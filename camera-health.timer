@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Camera Monitor health every minute
+
+[Timer]
+OnBootSec=90
+OnUnitActiveSec=60
+AccuracySec=10
+Unit=camera-health.service
+
+[Install]
+WantedBy=timers.target

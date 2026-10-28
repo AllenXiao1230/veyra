@@ -1,0 +1,10 @@
+[Unit]
+Description=Camera Monitor retention policy check at 03:10
+
+[Timer]
+OnCalendar=*-*-* 03:10:00
+Persistent=true
+Unit=camera-cleanup.service
+
+[Install]
+WantedBy=timers.target

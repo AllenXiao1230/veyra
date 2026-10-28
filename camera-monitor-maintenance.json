@@ -1,0 +1,4 @@
+{
+  "retention_days": 0,
+  "note": "0 means retain all data until an expiry policy is selected. Backups are retained independently."
+}

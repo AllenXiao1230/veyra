@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>伺服器端 AI 偵測 · Camera Monitor</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #101318;
+      color: #edf0f5;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 18px; }
+    header, main, footer { max-width: 1000px; margin: 0 auto; }
+    header {
+      display: flex; flex-wrap: wrap; align-items: center;
+      justify-content: space-between; gap: 12px; margin-bottom: 18px;
+    }
+    h1 { font-size: 1.25rem; margin: 0; }
+    a, button {
+      color: inherit; background: #252b35; border: 1px solid #414957;
+      border-radius: 10px; padding: 10px 14px; text-decoration: none;
+      font: inherit; cursor: pointer;
+    }
+    .panel {
+      background: #191e26; border: 1px solid #303744;
+      border-radius: 14px; padding: 16px; margin-bottom: 14px;
+    }
+    #motionLiveImage {
+      display: block; width: 100%; min-height: 180px;
+      object-fit: contain; background: #080a0d; border-radius: 10px;
+    }
+    .row {
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 12px;
+    }
+    #motionDetectionStatus { color: #b8c7dc; }
+    .hint { color: #aab3c1; font-size: .9rem; line-height: 1.6; }
+    footer { color: #8791a0; padding: 14px 0; font-size: .85rem; }
+  </style>
+  <link rel="stylesheet" href="/camera-ai-events.css">
+</head>
+<body>
+  <header>
+    <h1>CAMERA MONITOR / 伺服器端 AI 偵測</h1>
+    <a href="/?v=20261028-fix1">返回即時影像首頁</a>
+  </header>
+  <main>
+    <section class="panel">
+      <img id="motionLiveImage" src="/camera/stream" alt="即時攝影機影像">
+    </section>
+    <section class="panel">
+      <div class="row">
+        <div>
+          <strong>伺服器端持續偵測</strong>
+            <p id="motionDetectionStatus">服務連線狀態請見下方事件面板</p>
+        </div>
+      </div>
+        <p class="hint">移動偵測與事件紀錄由伺服器背景服務持續執行；關閉此網頁不會停止偵測。本頁僅顯示即時影像與伺服器事件。</p>
+    </section>
+  </main>
+  <footer>Camera Monitor · Server-side motion detection</footer>
+  <script src="/camera-ai-events.js?v=20261028-fix1" data-camera-ai-ui></script>
+</body>
+</html>

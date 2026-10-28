@@ -1,0 +1,42 @@
+# Runtime data and local backups
+recordings/
+snapshots/
+backups/
+pipeline-check-*/
+fragment-check-*/
+remux-check-*/
+*.mp4
+*.mkv
+*.jpg
+*.jpeg
+*.sqlite*
+*.db
+*.log
+*.tar
+*.tar.gz
+*.zip
+
+# Credentials and machine-local configuration
+.env
+.env.*
+!.env.example
+*.env
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+hosts.yml
+.ssh/
+ssh_bridge.py
+
+# Development environments and generated files
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+ssh-runtime/
+.pytest_cache/
+.DS_Store
+Thumbs.db
+.vscode/
+work/

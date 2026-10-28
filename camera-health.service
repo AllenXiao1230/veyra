@@ -1,0 +1,12 @@
+[Unit]
+Description=Camera Monitor health supervision and disk warnings
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/camera-maintenance check --repair
+TimeoutStartSec=180
+StateDirectory=camera-maintenance
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#101216"><title>Camera Monitor / Recordings</title><style>
+
+:root {
+
+  color-scheme: dark;
+
+  --bg:#101216; --panel:#191d24; --line:#2b313b;
+
+  --text:#edf0f5; --muted:#969eab; --accent:#79a9ff;
+
+  --red:#ff626b; --green:#60d6a1;
+
+}
+
+* { box-sizing:border-box; }
+
+body {
+
+  margin:0; background:var(--bg); color:var(--text);
+
+  font:15px/1.5 system-ui,-apple-system,"Noto Sans TC",sans-serif;
+
+}
+
+header {
+
+  padding:20px clamp(16px,4vw,40px);
+
+  border-bottom:1px solid var(--line);
+
+  display:flex; justify-content:space-between; align-items:center;
+
+  gap:12px; flex-wrap:wrap;
+
+}
+
+h1 { font-size:20px; margin:0; letter-spacing:.04em; }
+
+h2 { font-size:17px; margin:0 0 16px; }
+
+main {
+
+  width:min(1200px,100%); margin:auto;
+
+  padding:22px clamp(12px,3vw,28px) 48px;
+
+}
+
+.panel {
+
+  background:var(--panel); border:1px solid var(--line);
+
+  border-radius:14px; padding:18px; margin-bottom:18px;
+
+}
+
+.topline,.actions,.record-row {
+
+  display:flex; align-items:center; justify-content:space-between;
+
+  gap:12px; flex-wrap:wrap;
+
+}
+
+.status { color:var(--muted); font-size:13px; }
+
+.dot {
+
+  display:inline-block; width:8px; height:8px;
+
+  background:var(--muted); border-radius:50%; margin-right:7px;
+
+}
+
+.dot.online { background:var(--green); }
+
+.dot.offline { background:var(--red); }
+
+button,.button {
+
+  border:1px solid var(--line); border-radius:9px;
+
+  background:#252b35; color:var(--text); padding:10px 14px;
+
+  font:inherit; cursor:pointer; text-decoration:none;
+
+}
+
+button:hover,.button:hover { border-color:var(--accent); }
+
+button:disabled { opacity:.45; cursor:not-allowed; }
+
+.primary { background:#254a7b; border-color:#3b659a; }
+
+.danger { background:#52252b; border-color:#853b44; }
+
+.viewer {
+
+  background:#08090b; border-radius:10px; overflow:hidden;
+
+  display:flex; justify-content:center; align-items:center;
+
+  min-height:220px; position:relative;
+
+}
+
+.viewer img {
+
+  display:block; width:100%; height:auto; max-height:75vh;
+
+  object-fit:contain;
+
+}
+
+.audio-frame {
+
+  width: 100%;
+
+  height: 260px;
+
+  border: 0;
+
+  border-radius: 8px;
+
+  background: #08090b;
+
+}
+
+.hint { color:var(--muted); font-size:13px; margin-top:12px; }
+
+.grid {
+
+  display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px;
+
+}
+
+input,select {
+
+  background:#10141a; color:var(--text); border:1px solid var(--line);
+
+  border-radius:8px; padding:10px; font:inherit;
+
+}
+
+.record-list { display:grid; gap:10px; }
+
+.record-row {
+
+  padding:12px; border:1px solid var(--line); border-radius:10px;
+
+}
+
+.record-name { overflow-wrap:anywhere; min-width:0; }
+
+.record-meta { color:var(--muted); font-size:12px; }
+
+video { display:block; width:100%; max-height:70vh; background:#050505; }
+
+.empty { color:var(--muted); padding:18px 0; }
+
+footer { color:var(--muted); text-align:center; font-size:12px; padding:8px; }
+
+
+:root { --focus:#a8c7ff; }
+html { scroll-behavior:smooth; }
+body { min-height:100vh; }
+header { position:sticky; top:0; z-index:20; background:rgba(16,18,22,.94); backdrop-filter:blur(12px); }
+main { max-width:1180px; }
+.panel { box-shadow:0 8px 28px rgba(0,0,0,.12); }
+.topline { align-items:center; }
+.viewer { min-height:180px; aspect-ratio:16 / 9; }
+.viewer img { width:100%; height:100%; max-height:75vh; object-fit:contain; }
+.viewer.is-paused::after {
+  content:"預覽已暫停"; position:absolute; left:50%; top:50%;
+  transform:translate(-50%,-50%); padding:8px 14px; border-radius:999px;
+  background:rgba(0,0,0,.72); color:#fff; font-size:14px; pointer-events:none;
+}
+.control-strip { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.control-group { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.control-label { color:var(--muted); font-size:13px; }
+button,.button,select { min-height:42px; }
+button:focus-visible,.button:focus-visible,select:focus-visible {
+  outline:2px solid var(--focus); outline-offset:2px;
+}
+button:active { transform:translateY(1px); }
+#liveStatus { overflow-wrap:anywhere; }
+.record-row { align-items:center; }
+.record-row .actions { justify-content:flex-end; }
+.audio-frame { max-height:260px; }
+[hidden] { display:none !important; }
+@media(max-width:700px) {
+  main { padding:14px 10px 32px; }
+  header { position:static; padding:14px; }
+  h1 { font-size:17px; }
+  .panel { padding:13px; border-radius:12px; margin-bottom:12px; }
+  .topline { align-items:flex-start; }
+  .topline > .actions { width:100%; }
+  .topline > .actions button { flex:1 1 auto; }
+  .viewer { min-height:150px; aspect-ratio:4 / 3; }
+  .viewer img { max-height:60vh; }
+  .control-strip { display:grid; grid-template-columns:1fr; }
+  .control-group { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .control-group button,.control-group select { width:100%; }
+  .actions button,.actions .button { flex:1 1 auto; text-align:center; }
+  .record-row { align-items:stretch; }
+  .record-row .actions { width:100%; }
+  .record-row .actions > * { flex:1; text-align:center; }
+  .audio-frame { height:220px; }
+}
+@media(prefers-reduced-motion:reduce) {
+  html { scroll-behavior:auto; }
+  *,*::before,*::after { transition:none !important; animation:none !important; }
+}
+
+@media(max-width:700px) {
+
+  .grid { grid-template-columns:1fr; }
+
+  .panel { padding:14px; }
+
+  header { padding:16px; }
+
+}
+
+</style></head><body>
+<header><h1>CAMERA MONITOR <span style="color:var(--muted)">/ RECORDINGS</span></h1><a class="button" href="/?v=20261028-fix1">返回即時影像</a></header>
+<main>
+<section class="panel"><div class="topline" style="margin-bottom:16px"><h2>錄影檔案</h2><button id="loadRecords">重新整理清單</button></div><div id="recordList" class="record-list"><div class="empty">正在載入錄影清單……</div></div></section>
+<section class="panel" id="playbackPanel" hidden><div class="topline" style="margin-bottom:14px"><h2 id="playbackTitle">影片回放</h2><button id="closePlayback">關閉播放器</button></div><video id="playbackVideo" controls playsinline preload="metadata"></video><div class="actions" style="margin-top:12px"><a id="downloadLink" class="button" href="#" download>下載影片</a></div><p class="hint">若影片正在錄製，檔案尚未完成封裝時可能無法正常回放；建議選擇已完成的錄影檔。</p></section>
+</main><footer>Camera Monitor · Local services over HTTPS</footer>
+<script>
+"use strict";
+const API="/recordings-api"; const $=id=>document.getElementById(id);
+async function api(path){const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),20000);try{const r=await fetch(API+path,{cache:"no-store",signal:controller.signal});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||("HTTP "+r.status));return d;}finally{clearTimeout(timeout);}}
+function formatBytes(bytes){if(typeof bytes!=="number")return "";const u=["B","KB","MB","GB","TB"];let i=0,v=bytes;while(v>=1024&&i<u.length-1){v/=1024;i++;}return v.toFixed(i===0?0:1)+" "+u[i];}
+let loading=false;
+async function loadRecords(){
+  if(loading)return;
+  loading=true;
+  const list=$("recordList");
+  try{
+    const data=await api("/recordings");
+    const records=Array.isArray(data)?data:(data.recordings||[]);
+    list.replaceChildren();
+    for(const record of records){
+      const filename=typeof record==="string"?record:record.filename;
+      if(!filename||!/^recording-[\w-]+\.(mp4|mkv)$/.test(filename))continue;
+      const row=document.createElement("div");row.className="record-row";
+      const info=document.createElement("div");info.className="record-name";
+      const name=document.createElement("div");name.textContent=filename;
+      const meta=document.createElement("div");meta.className="record-meta";
+      meta.textContent=[record.size!=null?formatBytes(record.size):"",record.modified||"",record.health_message||""].filter(Boolean).join(" · ");
+      if(record.health==="damaged")meta.style.color="#ffb6b6";
+      info.append(name,meta);
+      const actions=document.createElement("div");actions.className="actions";
+      const play=document.createElement("button");play.className="primary";
+      play.disabled=record.playable!==true;
+      play.textContent=record.health==="damaged"?"無法回放":filename.endsWith(".mkv")?"MKV 請下載":record.health==="recording"?"錄製中":"回放";
+      play.addEventListener("click",()=>playRecording(filename));
+      const dl=document.createElement("a");dl.className="button";
+      dl.textContent=record.health==="damaged"?"下載原檔":"下載";
+      dl.href=API+"/file/"+encodeURIComponent(filename);dl.download=filename;
+      actions.append(play,dl);row.append(info,actions);list.append(row);
+    }
+    if(!list.children.length)list.textContent="目前沒有錄影檔案。";
+  }catch(e){list.textContent="無法載入錄影清單："+e.message;}
+  finally{loading=false;}
+}
+function playRecording(filename){const url=API+"/file/"+encodeURIComponent(filename);$("playbackPanel").hidden=false;$("playbackTitle").textContent=filename;$("playbackVideo").src=url;$("downloadLink").href=url;$("downloadLink").download=filename;$("playbackPanel").scrollIntoView({behavior:"smooth",block:"start"});$("playbackVideo").load();}
+$("closePlayback").addEventListener("click",()=>{$("playbackVideo").pause();$("playbackVideo").removeAttribute("src");$("playbackVideo").load();$("playbackPanel").hidden=true;});$("loadRecords").addEventListener("click",loadRecords);loadRecords();setInterval(()=>{if(!document.hidden)loadRecords();},60000);
+</script></body></html>

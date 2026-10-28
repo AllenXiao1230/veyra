@@ -1,0 +1,11 @@
+/var/log/camera-recorder-ffmpeg.log {
+    daily
+    rotate 7
+    maxsize 10M
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    su root root
+}

@@ -1,0 +1,3 @@
+# Preserve deployed release bytes so the SHA-256 manifest stays reproducible.
+* -text
+*.py diff=python

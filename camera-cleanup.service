@@ -1,0 +1,14 @@
+[Unit]
+Description=Camera Monitor expiry cleanup (disabled until retention is configured)
+After=camera-backup.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/camera-maintenance cleanup --apply
+TimeoutStartSec=3600
+Nice=10
+IOSchedulingClass=idle
+UMask=0077
+StateDirectory=camera-maintenance
+NoNewPrivileges=true
+PrivateTmp=true
