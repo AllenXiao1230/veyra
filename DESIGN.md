@@ -169,7 +169,7 @@ The centered header and main container cap at (1360px); live main caps at (1280p
 
 Media grids use four equal columns with row/column gaps (22px / 18px). At maximum width (1050px) they use three columns. At maximum width (700px) they use two columns with gaps (18px / 12px). Date groups have (32px) separation. Thumbnails are (16 / 10) on larger screens and (4 / 3) on phones; the live viewer is (16 / 9), with contained imagery by default and a user-selectable fill preference.
 
-At the phone breakpoint, main padding becomes (24px 18px 40px). The header wraps: brand/settings stay above a full-width three-link navigation row. Secondary button wording and visible date labels compact while accessible names remain. The audio meter and decorative audio icon hide; the listening action stays available. Media action buttons shrink to (30px) width and (34px) minimum height, while standard buttons/fields retain their desktop (42px) minimum height. Viewer tools use (36px) on phones. These are distinct source sizes, not a claim that every control is 42px.
+At the phone breakpoint, main padding becomes (24px 18px 40px). The header wraps: brand/settings stay above a full-width three-link navigation row. Secondary button wording and visible date labels compact while accessible names remain. The decorative audio icon hides; the listening action stays available. The real-time audio meter wraps beneath those controls and remains visible at every width. Media action buttons shrink to (30px) width and (34px) minimum height, while standard buttons/fields retain their desktop (42px) minimum height. Viewer tools use (36px) on phones. These are distinct source sizes, not a claim that every control is 42px.
 
 Dialogs retain viewport gutters via width `min(600px, calc(100% - 24px))` and maximum height `calc(100dvh - 32px)`. Confirmations cap at (420px), previews at (1100px). Preview media uses `object-fit: contain` and maximum height (72dvh).
 
@@ -215,7 +215,7 @@ Native dialogs use the surface ground, dialog radius, overlay shadow and labeled
 
 Notifications sit centered above the bottom edge, using the raised ground, media radius and overlay shadow. They wrap long text and stay within viewport gutters. An undo action remains visible until dismissed or used; notifications without an action expire after (7000ms). The bottom inset changes from (24px) to (14px) on phones.
 
-The audio meter uses a green fill on a slate track; width updates transition over (120ms ease-out). Reduced motion removes that transition. No other decorative animation is part of the shared system.
+The audio meter uses a green fill on an 8px slate track, red at −3 dBFS and above, with a tabular dBFS readout. A 180–360px desktop group wraps to the full row on phones. It measures server microphone input independently of browser listening; missing data clears the fill and shows a concise unavailable label. Width updates transition over (120ms ease-out). Reduced motion removes that transition. No other decorative animation is part of the shared system.
 
 ## Do's and Don'ts
 

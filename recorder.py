@@ -20,6 +20,7 @@ HOST = "127.0.0.1"
 PORT = 8091
 VIDEO_DIR = "/var/lib/camera-recorder"
 SOURCE = "http://127.0.0.1:8080/stream"
+RECORDING_SOURCE = "http://127.0.0.1:8093/stream"
 AUDIO_SOURCE = "rtsp://127.0.0.1:8554/mic"
 FILENAME_RE = re.compile(r"^recording-\d{8}-\d{6}\.(mp4|mkv)$")
 LOG_FILE = "/var/log/camera-recorder-ffmpeg.log"
@@ -124,13 +125,13 @@ def start_recording():
         try:
             import urllib.request
             request = urllib.request.Request(
-                SOURCE, headers={"User-Agent": "CameraRecorder/1.0"}
+                RECORDING_SOURCE, headers={"User-Agent": "CameraRecorder/1.0"}
             )
             with urllib.request.urlopen(request, timeout=5) as response:
                 if response.status != 200:
                     raise RuntimeError("攝影機串流回應非 200")
         except Exception as exc:
-            last_error = f"無法連接 uStreamer：{exc}"
+            last_error = f"無法連接時間戳影像串流：{exc}"
             recording_state = "failed"
             raise RuntimeError(last_error) from exc
 
@@ -146,8 +147,9 @@ def start_recording():
 
             "-thread_queue_size", "512",
             "-f", "mpjpeg",
+            "-use_wallclock_as_timestamps", "1",
             "-rw_timeout", "5000000",
-            "-i", SOURCE,
+            "-i", RECORDING_SOURCE,
 
             "-thread_queue_size", "512",
             "-rtsp_transport", "tcp",
@@ -157,7 +159,9 @@ def start_recording():
             "-map", "0:v:0",
             "-map", "1:a:0",
 
-            "-vf", "fps=15,format=nv12,hwupload",
+            # mpjpeg has no reliable frame timestamps; its decoder otherwise
+            # invents 25 fps and speeds up a slower live preview.
+            "-vf", "setpts=(RTCTIME-RTCSTART)/(TB*1000000),fps=15,format=nv12,hwupload",
             "-c:v", "h264_vaapi",
             "-rc_mode", "CQP",
             "-qp", "23",

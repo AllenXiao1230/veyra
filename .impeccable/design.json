@@ -194,7 +194,7 @@
       {
         "name": "audio-level",
         "value": "width 120ms ease-out",
-        "purpose": "Audio meter level updates; removed for reduced motion."
+        "purpose": "Server microphone level updates with a dBFS readout, visible on desktop and phone independently of listening; transition removed for reduced motion."
       }
     ],
     "breakpoints": [

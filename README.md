@@ -1,6 +1,6 @@
 # Camera Monitor
 
-Ubuntu 攝影機監控專案的 `fix1`、`audio1` 與 `library1` 部署來源：背景移動偵測、事件快照、時間戳直播、
+Ubuntu 攝影機監控專案的 `fix1`、`audio1`、`library1` 與 `meter1` 部署來源：背景移動偵測、事件快照、時間戳直播、
 動態錄影、健康監控與增量備份。網頁透過 nginx 和 Tailscale 提供私有存取。
 
 這份 repository 對應已部署的維護版本，不是從零安裝套件；完整操作說明與驗收限制見
@@ -24,7 +24,7 @@ Ubuntu 攝影機監控專案的 `fix1`、`audio1` 與 `library1` 部署來源：
 | `camera-*.service`、`camera-*.timer` | systemd 健康檢查、備份與保存期限排程 |
 | `nginx-camera-monitor` | loopback Web 入口與反向代理設定 |
 | `camera-monitor-fix1-manifest.json` | 24 個部署檔案的路徑與 SHA-256 |
-| `camera-monitor-library1-manifest.json` | 此次完整部署檔案的路徑與 SHA-256 |
+| `camera-monitor-meter1-manifest.json` | 目前完整部署檔案的路徑與 SHA-256；保留前版 manifest 供比較 |
 
 檔案保持平面配置，便於核對部署內容與在隔離目錄執行既有測試。Repository 不包含
 錄影、快照、事件資料庫、密碼、SSH 連線工具或正式環境的憑證。
@@ -99,6 +99,18 @@ API 使用既有的 `/ai-api/` 及 `/recordings-api/`：`GET /library?limit=48&d
 寫入驗證同源、JSON 格式及檔名，nginx 會轉送原始 Host。完整媒體清單包含沒有事件關聯的快照，沒有固定的歷史資料上限。
 
 介面設計依 `PRODUCT.md` 及 Impeccable 的表面 brief；截圖檢查檔位於 Git 排除的 `.impeccable/review/`，不將實際快照或錄影納入版本控制。
+
+## 即時音量與錄影時間戳（meter1）
+
+首頁的音量條在桌面與手機皆顯示，直接量測伺服器所選麥克風的輸入，不必開啟瀏覽器監聽。
+數字為 dBFS；−60 dBFS 以下顯示空條，−3 dBFS 以上轉紅。斷線或兩秒未更新會清空，
+不把舊值顯示成即時訊號。`GET /audio-api/level` 僅回傳目前量測值，不儲存音訊。
+量測使用既有 FFmpeg 發布程序的 astats，不新增麥克風擷取程序；網頁隱藏時停止更新請求。
+
+新錄影改取用 `http://127.0.0.1:8093/stream` 的時間戳影像，左上角的時間直接寫入影片影格。
+動作偵測繼續取用 8080 原始串流，避免時鐘變動觸發偵測。時間戳來源中斷時錄影會報錯，
+不會降級為無時間戳錄影。原有歷史影片不會被改寫。可用 `sudo python3 verify_meter_timestamp.py`
+在隔離目錄產生短片及驗證影格，確認實際 H.264/AAC 輸出。
 
 ## 維護
 

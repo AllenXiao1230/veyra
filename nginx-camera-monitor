@@ -56,6 +56,13 @@ location /camera/ {
         proxy_set_header X-Forwarded-Proto https;
     }
 
+    location = /audio-api/level {
+        proxy_pass http://127.0.0.1:8094/level;
+        proxy_set_header Host $http_host;
+        proxy_read_timeout 5s;
+        access_log off;
+    }
+
     location /audio-api/ {
         proxy_pass http://127.0.0.1:8094/;
         proxy_set_header Host $http_host;

@@ -88,6 +88,17 @@ class FixTests(unittest.TestCase):
                 self.assertIn("FFmpeg", rec.last_error)
             rec.recorder = None
 
+    def test_missing_timestamp_stream_fails_without_raw_fallback(self):
+        rec.recorder = None
+        with tempfile.TemporaryDirectory() as folder, patch.object(rec, "VIDEO_DIR", folder), \
+             patch("urllib.request.urlopen", side_effect=OSError("timestamp source offline")), \
+             patch.object(rec.subprocess, "Popen") as encoder:
+            with self.assertRaisesRegex(RuntimeError, "時間戳"):
+                rec.start_recording()
+            encoder.assert_not_called()
+            self.assertEqual(rec.recording_state, "failed")
+        rec.recorder = None
+
     def test_unexpected_recorder_exit_is_persistent_failure(self):
         proc = MagicMock()
         proc.poll.return_value = 7

@@ -67,12 +67,15 @@ main { width: min(1360px, 100%); margin: auto; padding: 30px 32px 56px; }
 .record-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 0; border-bottom: 1px solid var(--line); }
 .record-summary { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .record-summary h2, .audio-copy h2 { font-size: 1rem; }
-.audio-row { display: flex; align-items: center; gap: 20px; padding: 20px 0; }
+.audio-row { display: flex; flex-wrap: wrap; align-items: center; gap: 20px; padding: 20px 0; }
 .audio-icon { color: var(--muted); }
 .audio-copy { min-width: 0; }
 .audio-copy p { color: var(--muted); font-size: .86rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 38ch; }
-.audio-level { flex: 1; max-width: 240px; min-width: 35px; height: 5px; background: var(--line); border-radius: 5px; overflow: hidden; margin-left: auto; }
+.audio-meter { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 180px; max-width: 360px; margin-left: auto; }
+.audio-level { flex: 1; min-width: 35px; height: 8px; background: var(--line); border-radius: 5px; overflow: hidden; }
 .audio-level span { display: block; height: 100%; width: 0; background: var(--green); transition: width 120ms ease-out; }
+.audio-level[data-state="high"] span { background: var(--red); }
+.audio-meter output { min-width: 80px; text-align: right; color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
 .audio-frame { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; border: 0; }
 .notice { color: var(--amber); font-size: .9rem; max-width: 75ch; margin-top: 10px; overflow-wrap: anywhere; }
 .library-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 30px; }
@@ -172,7 +175,7 @@ dialog[open] { animation: dialog-enter 180ms cubic-bezier(.16,1,.3,1); }
   .record-summary { gap: 6px; flex-direction: column; align-items: flex-start; }
   .audio-row { gap: 11px; padding: 18px 0; }
   .audio-copy p { max-width: 20ch; font-size: .8rem; }
-  .audio-level { display: none; }
+  .audio-meter { order: 3; flex-basis: 100%; max-width: none; margin-left: 0; }
   .audio-row > button { margin-left: auto; }
   .audio-icon { display: none; }
   .library-toolbar { gap: 12px; margin-bottom: 24px; }

@@ -1,4 +1,5 @@
 import http.client
+import io
 import json
 import pathlib
 import subprocess
@@ -31,6 +32,58 @@ class AudioTests(unittest.TestCase):
         self.service.process_revision = self.service.revision
         self.service.last_progress = self.service.last_packet = time.monotonic()
         self.service.actual_source = DEVICE["name"]
+
+    def test_level_uses_live_publisher_samples_and_rejects_stale_or_old_source(self):
+        self.healthy_process()
+        proc = self.service.process
+        proc.stderr = io.StringIO("frame:1 pts:0\nlavfi.astats.Overall.RMS_level=-30\nreal warning\n")
+        self.service.read_errors(proc)
+        self.assertEqual(self.service.level(), {"available": True, "level": 50, "dbfs": -30.0})
+        self.assertEqual(list(self.service.errors), ["real warning"])
+        self.service.level_at -= 3
+        self.assertFalse(self.service.level()["available"])
+        self.service.level_at = time.monotonic()
+        self.service.revision += 1
+        self.assertFalse(self.service.level()["available"])
+        self.service.revision -= 1
+        self.service.actual_source = "wrong.microphone"
+        self.assertFalse(self.service.level()["available"])
+
+    def test_level_handles_silence_invalid_numbers_and_late_publisher(self):
+        self.healthy_process()
+        proc = self.service.process
+        proc.stderr = io.StringIO("lavfi.astats.Overall.RMS_level=-inf\n")
+        self.service.read_errors(proc)
+        self.assertEqual(self.service.level(), {"available": True, "level": 0, "dbfs": None})
+        self.service.level_at = 0
+        proc.stderr = io.StringIO("lavfi.astats.Overall.RMS_level=nan\nlavfi.astats.Overall.RMS_level=inf\nlavfi.astats.Overall.RMS_level=bad\n")
+        self.service.read_errors(proc)
+        self.assertFalse(self.service.level()["available"])
+        old = MagicMock(stderr=io.StringIO("lavfi.astats.Overall.RMS_level=-1\n"))
+        self.service.read_errors(old)
+        self.assertFalse(self.service.level()["available"])
+        # Silence serializes as valid JSON rather than a nonstandard Infinity value.
+        json.dumps(self.service.level(), allow_nan=False)
+
+    def test_level_endpoint_is_read_only_and_available_without_listening(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), audio.Handler)
+        server.audio = self.service
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            self.healthy_process()
+            self.service.level_dbfs = -12
+            self.service.level_at = time.monotonic()
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+            connection.request("GET", "/level")
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.loads(response.read()), {"available": True, "level": 80, "dbfs": -12})
+            connection.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_alive_process_without_fresh_packets_or_progress_is_unhealthy(self):
         self.healthy_process()

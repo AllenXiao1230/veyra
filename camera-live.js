@@ -15,12 +15,9 @@
   let publisherPid = null;
   let wasHealthy = false;
   let audioSeen = false;
-  let context = null;
-  let analyser = null;
-  let source = null;
-  let attachedStream = null;
-  let samples = null;
-  let meterRaf = 0;
+  let levelTimer;
+  let levelBusy = false;
+  let pageGone = false;
   let fingerprint = "";
   let lastChange = Date.now();
   let healthBusy = false;
@@ -140,59 +137,47 @@
     $("listenToggle").innerHTML = ui.icon(wantsAudio ? "muted" : "volume") + `<span>${wantsAudio ? "停止監聽" : "開啟監聽"}</span>`;
     $("listenToggle").setAttribute("aria-pressed", String(wantsAudio));
   }
-  function drawMeter() {
-    if (!analyser || !samples || document.hidden) return;
-    analyser.getByteTimeDomainData(samples);
-    const rms = Math.sqrt(samples.reduce((sum, x) => sum + ((x - 128) / 128) ** 2, 0) / samples.length);
-    const db = rms > 0 ? 20 * Math.log10(rms) : -100;
-    const value = Math.round(Math.max(0, Math.min(100, (db + 60) / 60 * 100)));
+  function renderLevel(state) {
+    const value = state?.available ? Math.max(0, Math.min(100, state.level)) : 0;
+    const text = state?.available ? (state.dbfs === null ? "−∞ dBFS" : state.dbfs.toFixed(1) + " dBFS") : "暫無訊號";
+    const meter = $("audioLevel").parentElement;
     $("audioLevel").style.width = value + "%";
-    $("audioLevel").parentElement.setAttribute("aria-valuenow", String(value));
-    meterRaf = requestAnimationFrame(drawMeter);
+    meter.dataset.state = state?.available && state.dbfs !== null && state.dbfs >= -3 ? "high" : "normal";
+    meter.setAttribute("aria-valuenow", String(value));
+    meter.setAttribute("aria-valuetext", text);
+    $("audioLevelValue").textContent = text;
+    $("audioLevelValue").removeAttribute("title");
   }
-  function attachMeter() {
-    const stream = audioVideo()?.srcObject;
-    if (!context || !stream?.getAudioTracks().length || stream === attachedStream) return;
-    try {
-      source?.disconnect();
-      analyser?.disconnect();
-      source = context.createMediaStreamSource(stream);
-      analyser = context.createAnalyser();
-      analyser.fftSize = 1024;
-      samples = new Uint8Array(analyser.fftSize);
-      source.connect(analyser);
-      attachedStream = stream;
-      cancelAnimationFrame(meterRaf);
-      drawMeter();
-    } catch (_) {}
+  async function pollLevel() {
+    if (levelBusy || pageGone || document.hidden) return;
+    clearTimeout(levelTimer);
+    levelBusy = true;
+    let delay = 150;
+    try { renderLevel(await ui.api("/audio-api/level", undefined, 5000)); }
+    catch (error) { renderLevel(null); $("audioLevelValue").title = error.message; delay = 1000; }
+    finally {
+      levelBusy = false;
+      if (!pageGone && !document.hidden) levelTimer = setTimeout(pollLevel, delay);
+    }
   }
   async function startAudio() {
     const video = audioVideo();
     if (!video) throw new Error("音訊播放器載入中，請再按一次開啟監聽。");
-    context ||= new (window.AudioContext || window.webkitAudioContext)();
-    context.resume().catch(() => {});
     video.muted = false;
     await video.play();
-    attachMeter();
   }
   $("listenToggle").addEventListener("click", async () => {
     if (wantsAudio) {
       const video = audioVideo();
       if (video) { video.muted = true; video.pause(); }
       wantsAudio = false;
-      cancelAnimationFrame(meterRaf);
-      $("audioLevel").style.width = "0%";
     } else {
-      try { await startAudio(); wantsAudio = true; if (analyser) { cancelAnimationFrame(meterRaf); drawMeter(); } }
+      try { await startAudio(); wantsAudio = true; }
       catch (error) { ui.toast(error.message || "請重新開啟監聽。"); }
     }
     listenButton();
   });
   frame.addEventListener("load", () => {
-    attachedStream = null;
-    source?.disconnect();
-    analyser?.disconnect();
-    cancelAnimationFrame(meterRaf);
     if (wantsAudio) startAudio().catch(() => { wantsAudio = false; listenButton(); ui.toast("音訊已重連，請再按一次開啟監聽。"); });
   });
   window.addEventListener("camera-audio", event => {
@@ -222,7 +207,6 @@
   const monitorTimer = setInterval(() => {
     if (document.hidden) return;
     checkPreview();
-    if (wantsAudio) attachMeter();
     if (!paused && image.naturalWidth && connected) {
       try {
         painter.drawImage(image, 12, 12, Math.min(450, image.naturalWidth - 12), 48, 0, 0, 160, 40);
@@ -235,16 +219,19 @@
     }
   }, 3000);
   document.addEventListener("visibilitychange", () => {
-    cancelAnimationFrame(meterRaf);
+    clearTimeout(levelTimer);
     if (document.hidden) { clearTimeout(retryTimer); retryTimer = null; image.removeAttribute("src"); connected = false; }
-    else { if (!paused) connect(); if (wantsAudio && analyser) drawMeter(); }
+    else { if (!paused) connect(); pollLevel(); }
   });
   window.addEventListener("pagehide", event => {
     image.removeAttribute("src");
-    cancelAnimationFrame(meterRaf);
+    pageGone = true;
+    clearTimeout(levelTimer);
     if (!event.persisted) { clearInterval(monitorTimer); clearTimeout(retryTimer); clearTimeout(connectionTimer); }
   });
+  window.addEventListener("pageshow", () => { pageGone = false; pollLevel(); });
   if (ui.recorder()) recorderState(ui.recorder());
   connect(false);
   checkPreview();
+  pollLevel();
 })();

@@ -2,6 +2,7 @@
 """User-scoped microphone selection, RTSP publishing and bounded recovery."""
 import collections
 import json
+import math
 import os
 import pathlib
 import signal
@@ -87,6 +88,17 @@ class AudioService:
         self.restart_count = 0
         self.failures = 0
         self.actual_source = None
+        self.level_dbfs = None
+        self.level_at = 0.0
+
+    def level(self):
+        with self.lock:
+            available = bool(self.process is not None and self.process.poll() is None and
+                             self.process_revision == self.revision and self.actual_source == self.config.get("source") and
+                             self.level_at and time.monotonic() - self.level_at < 2)
+            db = self.level_dbfs if available else None
+            value = round(max(0, min(100, (db + 60) / 60 * 100))) if db is not None else 0
+            return {"available": available, "level": value, "dbfs": db}
 
     def save(self):
         self.config_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -164,9 +176,24 @@ class AudioService:
     def read_errors(self, proc):
         try:
             for line in proc.stderr:
+                text = line.strip()
+                if text.startswith("lavfi.astats.Overall.RMS_level="):
+                    try:
+                        value = float(text.split("=", 1)[1])
+                    except ValueError:
+                        continue
+                    if math.isnan(value) or value == math.inf:
+                        continue
+                    with self.lock:
+                        if self.process is proc:
+                            self.level_dbfs = max(-120.0, min(0.0, value)) if math.isfinite(value) else None
+                            self.level_at = time.monotonic()
+                    continue
+                if text.startswith("frame:"):
+                    continue
                 with self.lock:
                     if self.process is proc:
-                        self.errors.append(line.strip()[-300:])
+                        self.errors.append(text[-300:])
         finally:
             proc.stderr.close()
 
@@ -176,6 +203,8 @@ class AudioService:
         cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "warning",
                "-progress", "pipe:1", "-stats_period", "0.5", "-nostats",
                "-f", "pulse", "-i", config["source"], "-vn", "-ac", "1", "-ar", "48000",
+               "-af", "astats=metadata=1:reset=1:measure_perchannel=none:measure_overall=RMS_level,"
+                      "ametadata=mode=print:key=lavfi.astats.Overall.RMS_level:file=/dev/stderr:direct=1",
                "-c:a", "libopus", "-b:a", "32k", "-application", "lowdelay",
                "-f", "rtsp", "-rtsp_transport", "tcp", RTSP]
         proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -186,6 +215,8 @@ class AudioService:
             self.started = time.monotonic()
             self.last_progress = self.last_packet = 0.0
             self.last_out_time = 0
+            self.level_at = 0.0
+            self.level_dbfs = None
             self.errors.clear()
             self.actual_source = None
             self.state = "starting"
@@ -197,6 +228,8 @@ class AudioService:
         with self.lock:
             proc, self.process = self.process, None
             self.last_progress = self.last_packet = 0.0
+            self.level_at = 0.0
+            self.level_dbfs = None
             self.actual_source = None
         if proc is not None and proc.poll() is None:
             proc.terminate()
@@ -297,6 +330,12 @@ class AudioService:
 
 
 class Handler(BaseHTTPRequestHandler):
+    def log_request(self, code="-", size="-"):
+        # High-frequency read-only meter updates should not fill the journal.
+        if self.command == "GET" and urlparse(self.path).path == "/level" and code == 200:
+            return
+        super().log_request(code, size)
+
     def setup(self):
         super().setup()
         self.connection.settimeout(5)
@@ -312,6 +351,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
+        if path == "/level":
+            self.respond(200, self.server.audio.level())
+            return
         if path not in ("/status", "/health"):
             self.respond(404, {"error": "找不到 API"})
             return
