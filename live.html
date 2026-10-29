@@ -525,7 +525,30 @@ select:focus-visible, input:focus-visible {
 
       <h2>音訊監聽</h2>
 
-      <iframe class="audio-frame" src="/mic/" title="音訊監聽" loading="lazy" id="micFrame"></iframe>
+      <div class="actions" style="margin-bottom:12px">
+        <label for="audioSource">輸入來源</label>
+        <select id="audioSource" style="max-width:100%;min-width:0" disabled>
+          <option>正在讀取麥克風…</option>
+        </select>
+      </div>
+      <div class="actions" style="margin-bottom:12px">
+        <label for="audioVolume">輸入音量</label>
+        <input id="audioVolume" type="range" min="0" max="100" value="80">
+        <output id="audioVolumeValue" for="audioVolume">80%</output>
+        <label><input id="audioMuted" type="checkbox"> 靜音</label>
+      </div>
+      <div class="actions">
+        <button id="audioApply" class="primary" type="button" disabled>套用來源與音量</button>
+        <button id="audioRestart" type="button" disabled>重新啟動音訊</button>
+        <button id="audioRefresh" type="button">更新來源</button>
+      </div>
+      <p id="audioServiceStatus" class="hint" role="status" aria-live="polite">正在讀取音訊服務…</p>
+      <p id="audioActionStatus" class="hint" role="status" aria-live="polite"></p>
+      <p class="hint">設定會保存在伺服器。自動重連已啟用；請先停止錄影再手動切換或重啟音訊。</p>
+      <button id="audioListen" class="primary" type="button">開啟監聽聲音</button>
+      <p class="hint">瀏覽器可能先靜音播放；音訊正常後按上方按鈕開啟聲音。重連後可能需要再按一次。</p>
+
+      <iframe class="audio-frame" src="/mic/" title="音訊監聽" loading="lazy" allow="autoplay" id="micFrame"></iframe>
       <div class="mic-meter" role="group" aria-label="麥克風即時音量">
         <div class="mic-meter-top">
           <span>即時音量</span>
@@ -538,7 +561,7 @@ select:focus-visible, input:focus-visible {
         <p id="micMeterStatus" class="hint">請啟動音訊播放以開始分析</p>
       </div>
 
-      <p class="hint">音訊來源：MediaMTX</p>
+      <p class="hint">透過 MediaMTX 監聽所選麥克風；瀏覽器可能需要點按播放才會出聲。</p>
 
     </section>
 
@@ -961,7 +984,7 @@ setInterval(() => { if (!document.hidden) refreshStatus(); }, 10000);
 
 
 
-// Audio meter: analyze the same-origin MediaMTX player's video element.
+// Observe the WebRTC stream without rerouting or muting the player's sound.
 (() => {
   const frame = document.getElementById("micFrame");
   const bar = document.getElementById("micMeterBar");
@@ -973,7 +996,7 @@ setInterval(() => { if (!document.hidden) refreshStatus(); }, 10000);
   let source = null;
   let data = null;
   let raf = 0;
-  let attachedVideo = null;
+  let attachedStream = null;
 
   function setStatus(text) {
     status.textContent = text;
@@ -1012,24 +1035,27 @@ setInterval(() => { if (!document.hidden) refreshStatus(); }, 10000);
         setStatus("等待音訊播放器載入…");
         return;
       }
-      if (video === attachedVideo) return;
-      attachedVideo = video;
+      const stream = video.srcObject;
+      if (!stream || !stream.getAudioTracks?.().length) {
+        setStatus("等待播放器接收音訊；請先按播放鍵");
+        return;
+      }
 
       if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
       }
       await audioContext.resume();
+      if (stream === attachedStream) return;
 
-      // MediaElementSource can be created only once per media element.
       source?.disconnect();
       analyser?.disconnect();
-      source = audioContext.createMediaElementSource(video);
+      source = audioContext.createMediaStreamSource(stream);
+      attachedStream = stream;
       analyser = audioContext.createAnalyser();
       analyser.fftSize = 2048;
       data = new Uint8Array(analyser.fftSize);
 
       source.connect(analyser);
-      analyser.connect(audioContext.destination);
 
       setStatus("已連接播放器，等待音訊");
       cancelAnimationFrame(raf);
@@ -1041,7 +1067,11 @@ setInterval(() => { if (!document.hidden) refreshStatus(); }, 10000);
   }
 
   frame.addEventListener("load", () => {
-    attachedVideo = null;
+    attachedStream = null;
+    source?.disconnect();
+    analyser?.disconnect();
+    cancelAnimationFrame(raf);
+    frame.contentDocument?.addEventListener("click", attach);
     setStatus("播放器已載入，等待音訊分析");
     setTimeout(attach, 500);
   });
@@ -1063,7 +1093,10 @@ setInterval(() => { if (!document.hidden) refreshStatus(); }, 10000);
   });
 
   setStatus("等待音訊播放器載入…");
+  frame.contentDocument?.addEventListener("click", attach);
   setTimeout(attach, 1200);
+  const meterTimer = setInterval(() => { if (!document.hidden) attach(); }, 3000);
+  window.addEventListener("pagehide", event => { if (!event.persisted) clearInterval(meterTimer); });
 })();
 
 </script>
@@ -1071,6 +1104,7 @@ setInterval(() => { if (!document.hidden) refreshStatus(); }, 10000);
   
 
   <script src="/camera-ai-events.js?v=20261028-fix1" data-camera-ai-ui></script>
+  <script src="/camera-audio-controls.js?v=20261029-audio1" defer></script>
 </body>
 
 </html>

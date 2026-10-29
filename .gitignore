@@ -21,6 +21,7 @@ remux-check-*/
 .env.*
 !.env.example
 *.env
+audio.json
 *.pem
 *.key
 id_rsa*

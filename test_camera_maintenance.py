@@ -99,6 +99,23 @@ class MaintenanceTests(unittest.TestCase):
             with sqlite3.connect(first / "events.sqlite3") as db:
                 self.assertEqual(db.execute("PRAGMA quick_check").fetchone()[0], "ok")
 
+    def test_audio_stream_retry_is_not_reset_but_dead_api_restarts_user_unit(self):
+        def retrying(url):
+            return {"healthy": False, "state": "retrying"} if ":8094" in url else {"healthy": True}
+        with patch.object(m, "http_json", side_effect=retrying), patch.object(m.subprocess, "run") as restart:
+            m.health(repair=True)
+            m.health(repair=True)
+            restart.assert_not_called()
+        def dead(url):
+            if ":8094" in url:
+                raise OSError("API unavailable")
+            return {"healthy": True}
+        with patch.object(m, "http_json", side_effect=dead), patch.object(m.subprocess, "run") as restart:
+            m.health(repair=True)
+            command = restart.call_args.args[0]
+            self.assertEqual(command[:4], ["runuser", "-u", "xuan", "--"])
+            self.assertEqual(command[-4:], ["systemctl", "--user", "restart", "camera-audio"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

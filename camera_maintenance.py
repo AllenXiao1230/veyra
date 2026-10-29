@@ -48,13 +48,17 @@ def http_json(url):
 def health(repair=False):
     previous = read_json(STATE / "status.json", {})
     result = {"checked_at": datetime.now(timezone.utc).isoformat(), "services": {}}
-    for name, port in [("camera-ai", 8092), ("camera-recorder-api", 8091), ("camera-timestamp", 8093)]:
+    for name, port in [("camera-ai", 8092), ("camera-recorder-api", 8091), ("camera-timestamp", 8093),
+                       ("camera-audio", 8094)]:
         try:
             state = http_json(f"http://127.0.0.1:{port}/health")
             healthy = bool(state.get("healthy"))
             if name == "camera-recorder-api":
                 # Do not erase an encoder failure by restarting a healthy capture worker.
                 restartable = state.get("frame_age_seconds") is None or state["frame_age_seconds"] > 30
+            elif name == "camera-audio":
+                # Its supervisor retries stalled/absent sources without losing the API or backoff.
+                restartable = False
             else:
                 restartable = not healthy
         except Exception as exc:
@@ -63,7 +67,10 @@ def health(repair=False):
         failures = 0 if healthy else old.get("failures", 0) + 1
         last_restart = old.get("last_restart", 0)
         if repair and restartable and failures >= 2 and time.time() - last_restart > 300:
-            subprocess.run(["systemctl", "restart", name], check=True, timeout=50)
+            command = (["runuser", "-u", "xuan", "--", "env", "XDG_RUNTIME_DIR=/run/user/1000",
+                        "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus", "systemctl", "--user",
+                        "restart", name] if name == "camera-audio" else ["systemctl", "restart", name])
+            subprocess.run(command, check=True, timeout=50)
             last_restart = time.time()
             state["action"] = "restarted after repeated failed checks"
         result["services"][name] = {"healthy": healthy, "failures": failures,
@@ -94,7 +101,7 @@ def backup(dry_run=False):
     paths = ["/opt/camera-ai", "/opt/camera-recorder", "/opt/camera-timestamp", "/opt/camera-common", "/opt/camera-monitor",
              "/etc/camera-ai", "/etc/nginx", "/etc/camera-monitor-maintenance.json",
              "/etc/logrotate.d/camera-recorder", "/var/www/camera-monitor",
-             "/home/xuan/.config/systemd/user", "/home/xuan/.config/mediamtx",
+             "/home/xuan/.config/systemd/user", "/home/xuan/.config/mediamtx", "/home/xuan/.config/camera-monitor",
              "/usr/local/sbin/camera-maintenance"]
     paths += [str(p) for p in pathlib.Path("/etc/systemd/system").glob("camera-*")]
     with tarfile.open(destination / "configuration.tar.gz", "w:gz") as archive:

@@ -1,0 +1,19 @@
+[Unit]
+Description=Camera microphone selection, publishing and recovery API
+Wants=camera-mediamtx.service pipewire-pulse.service
+After=camera-mediamtx.service pipewire-pulse.service
+
+[Service]
+Type=simple
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=PULSE_SERVER=unix:/run/user/1000/pulse/native
+ExecStart=/usr/bin/python3 /opt/camera-common/camera_audio.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

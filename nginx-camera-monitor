@@ -44,6 +44,20 @@ location /camera/ {
         proxy_set_header X-Forwarded-Proto https;
     }
 
+    location /audio-api/ {
+        proxy_pass http://127.0.0.1:8094/;
+        proxy_set_header Host $http_host;
+        proxy_http_version 1.1;
+        proxy_read_timeout 10s;
+        client_max_body_size 8k;
+    }
+
+    location = /camera-audio-controls.js {
+        add_header Cache-Control "no-cache" always;
+        root /var/www/camera-monitor;
+        try_files $uri =404;
+    }
+
     location /mic/ {
         proxy_pass http://127.0.0.1:8889;
         proxy_set_header Host $http_host;
