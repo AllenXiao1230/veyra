@@ -1,6 +1,6 @@
 # Camera Monitor
 
-Ubuntu 攝影機監控專案的 `fix1` 與 `audio1` 部署來源：背景移動偵測、事件快照、時間戳直播、
+Ubuntu 攝影機監控專案的 `fix1`、`audio1` 與 `library1` 部署來源：背景移動偵測、事件快照、時間戳直播、
 動態錄影、健康監控與增量備份。網頁透過 nginx 和 Tailscale 提供私有存取。
 
 這份 repository 對應已部署的維護版本，不是從零安裝套件；完整操作說明與驗收限制見
@@ -16,12 +16,15 @@ Ubuntu 攝影機監控專案的 `fix1` 與 `audio1` 部署來源：背景移動�
 | `camera_runtime.py`、`camera_catalog.py`、`wait_ready.py` | `/opt/camera-common/` |
 | `camera_maintenance.py` | `/usr/local/sbin/camera-maintenance` |
 | `camera_audio.py` | `/opt/camera-common/camera_audio.py`，來源選擇、音訊 API 與發布 supervisor |
+| `camera_media.py` | `/opt/camera-common/camera_media.py`，完整媒體清單、日期分類、縮圖與回收桶 |
+| `camera-ui.css`、`camera-ui.js`、`camera-live.js`、`camera-library.js` | 三個頁面的共用介面、設定、監看與相簿互動 |
 | `camera-audio.service` | 使用者 unit，`~/.config/systemd/user/camera-audio.service` |
 | `camera-audio-controls.js` | 網頁音訊控制；API 經 `/audio-api/` 代理至 loopback 8094 |
-| `live.html`、`motion.html`、`recordings.html`、事件 JS/CSS | `/var/www/camera-monitor/`；live.html 部署為 index.html |
+| `live.html`、`snapshots.html`、`recordings.html` | `/var/www/camera-monitor/`；live.html 部署為 index.html，舊 motion.html 網址轉向快照 |
 | `camera-*.service`、`camera-*.timer` | systemd 健康檢查、備份與保存期限排程 |
 | `nginx-camera-monitor` | loopback Web 入口與反向代理設定 |
 | `camera-monitor-fix1-manifest.json` | 24 個部署檔案的路徑與 SHA-256 |
+| `camera-monitor-library1-manifest.json` | 此次完整部署檔案的路徑與 SHA-256 |
 
 檔案保持平面配置，便於核對部署內容與在隔離目錄執行既有測試。Repository 不包含
 錄影、快照、事件資料庫、密碼、SSH 連線工具或正式環境的憑證。
@@ -33,6 +36,7 @@ Ubuntu 攝影機監控專案的 `fix1` 與 `audio1` 部署來源：背景移動�
 ```bash
 python3 test_camera_fixes.py
 python3 test_camera_audio.py
+python3 test_camera_media.py
 sudo python3 test_camera_maintenance.py
 ```
 
@@ -75,6 +79,26 @@ API：`GET /audio-api/status`、`GET /audio-api/health`；
 `POST /audio-api/source` 接受 `source`、整數 `volume`、布林 `muted`；
 `POST /audio-api/restart` 接受空 JSON 物件。寫入 API 驗證同源、請求格式與來源清單，
 僅透過現有 nginx/Tailscale 入口存取。錄影仍要求有效音訊，沒有加入靜默降級為無聲錄影的行為。
+
+## 媒體管理（library1）
+
+首頁只顯示即時影像、錄影控制及精簡的音訊監聽列；右上角「設定」統一管理影像顯示、自動重連、動態觸發錄影及音訊來源／音量／靜音／重啟。
+`/snapshots.html` 顯示全部實際快照，按台北日期分類並以游標分頁載入；舊 `/motion.html` 導向此頁。
+`/recordings.html` 使用相同導覽、日期篩選及設定視窗，提供實際影片縮圖、回放、下載和刪除。
+
+刪除會將檔案搬到同磁碟的回收桶，保留原檔內容與復原記錄，不提供永久清除：
+
+- 快照：`/var/lib/camera-ai/trash/`，移除時將關聯事件的圖片欄位清空，復原時恢復原關聯，事件本身保留。
+- 錄影：`/var/lib/camera-recorder/.trash/`，錄影進行中的檔案拒絕刪除。
+- 刪除通知可直接「復原」，或由各頁的「回收桶」復原；回收桶也納入每日備份。
+- 影片縮圖快取位於 `/var/lib/camera-recorder/.thumbnails/`，以檔名、大小及修改時間辨識版本，同時最多兩個編碼工作；損壞檔案仍保留下載與刪除功能。
+
+API 使用既有的 `/ai-api/` 及 `/recordings-api/`：`GET /library?limit=48&date=YYYY-MM-DD&before=...`、
+`GET /trash`、`POST /trash {"filename":"..."}`、`POST /restore {"token":"..."}`。
+快照原圖為 `/ai-api/snapshots/<filename>`；影片縮圖為 `/recordings-api/thumbnail/<filename>`。
+寫入驗證同源、JSON 格式及檔名，nginx 會轉送原始 Host。完整媒體清單包含沒有事件關聯的快照，沒有固定的歷史資料上限。
+
+介面設計依 `PRODUCT.md` 及 Impeccable 的表面 brief；截圖檢查檔位於 Git 排除的 `.impeccable/review/`，不將實際快照或錄影納入版本控制。
 
 ## 維護
 

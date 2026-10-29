@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#101216"><title>快照 · Camera Monitor</title>
+  <link rel="stylesheet" href="/camera-ui.css?v=library1">
+  <script src="/camera-ui.js?v=library1" defer></script>
+  <script src="/camera-library.js?v=library1" defer></script>
+</head>
+<body data-page="snapshots">
+  <header class="app-header" id="appHeader"></header>
+  <main>
+    <div class="page-heading"><div class="heading-label"><h1 id="libraryTitle">快照</h1><span id="libraryCount" class="count" role="status">讀取中</span></div><button id="trashToggle" class="quiet" type="button"><span data-icon="trash"></span><span>回收桶</span></button></div>
+    <div class="library-toolbar">
+      <div class="filter-group"><label for="mediaDate">日期</label><select id="mediaDate"><option value="">全部日期</option></select></div>
+      <div class="toolbar-actions"><button id="selectToggle" type="button">選取</button><button id="libraryRefresh" type="button" aria-label="重新整理快照"><span data-icon="refresh"></span><span class="optional-label">重新整理</span></button></div>
+    </div>
+    <div id="selectionBar" class="selection-bar" hidden><span id="selectionCount">已選取 0 張</span><button id="selectLoaded" class="quiet" type="button">全選已載入</button><button id="deleteSelected" class="danger" type="button" disabled>刪除</button></div>
+    <div id="libraryContent" aria-busy="true"><div class="loading-grid" aria-label="快照載入中"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div></div>
+    <div class="library-footer"><span id="loadedCount" role="status"></span><button id="loadMore" type="button" hidden>載入更多快照</button></div>
+  </main>
+</body>
+</html>

@@ -41,3 +41,5 @@ ssh-runtime/
 Thumbs.db
 .vscode/
 work/
+.impeccable/review/
+.impeccable/mocks/

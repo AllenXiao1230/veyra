@@ -1,0 +1,331 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-29T04:43:02.724659+00:00",
+  "title": "Design System: Camera Monitor",
+  "extensions": {
+    "colorMeta": {
+      "bg": {
+        "role": "neutral",
+        "displayName": "Blue-Black Ground",
+        "tonalRamp": [
+          "oklch(15% 0.0047 264.33)",
+          "oklch(26% 0.0068 264.33)",
+          "oklch(38% 0.0083 264.33)",
+          "oklch(50% 0.0088 264.33)",
+          "oklch(62% 0.0083 264.33)",
+          "oklch(74% 0.0068 264.33)",
+          "oklch(86% 0.0045 264.33)",
+          "oklch(95% 0.0020 264.33)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Dark Blue-Gray Surface",
+        "tonalRamp": [
+          "oklch(15% 0.0091 259.75)",
+          "oklch(26% 0.0134 259.75)",
+          "oklch(38% 0.0162 259.75)",
+          "oklch(50% 0.0172 259.75)",
+          "oklch(62% 0.0162 259.75)",
+          "oklch(74% 0.0134 259.75)",
+          "oklch(86% 0.0087 259.75)",
+          "oklch(95% 0.0039 259.75)"
+        ]
+      },
+      "raised": {
+        "role": "neutral",
+        "displayName": "Raised Blue-Gray",
+        "tonalRamp": [
+          "oklch(15% 0.0120 259.36)",
+          "oklch(26% 0.0176 259.36)",
+          "oklch(38% 0.0213 259.36)",
+          "oklch(50% 0.0226 259.36)",
+          "oklch(62% 0.0213 259.36)",
+          "oklch(74% 0.0176 259.36)",
+          "oklch(86% 0.0114 259.36)",
+          "oklch(95% 0.0051 259.36)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Slate Divider",
+        "tonalRamp": [
+          "oklch(15% 0.0136 257.52)",
+          "oklch(26% 0.0199 257.52)",
+          "oklch(38% 0.0242 257.52)",
+          "oklch(50% 0.0257 257.52)",
+          "oklch(62% 0.0242 257.52)",
+          "oklch(74% 0.0199 257.52)",
+          "oklch(86% 0.0130 257.52)",
+          "oklch(95% 0.0058 257.52)"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Pale Reading Text",
+        "tonalRamp": [
+          "oklch(15% 0.0040 260.73)",
+          "oklch(26% 0.0058 260.73)",
+          "oklch(38% 0.0070 260.73)",
+          "oklch(50% 0.0074 260.73)",
+          "oklch(62% 0.0070 260.73)",
+          "oklch(74% 0.0058 260.73)",
+          "oklch(86% 0.0038 260.73)",
+          "oklch(95% 0.0017 260.73)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted Slate Text",
+        "tonalRamp": [
+          "oklch(15% 0.0129 258.37)",
+          "oklch(26% 0.0188 258.37)",
+          "oklch(38% 0.0229 258.37)",
+          "oklch(50% 0.0242 258.37)",
+          "oklch(62% 0.0229 258.37)",
+          "oklch(74% 0.0188 258.37)",
+          "oklch(86% 0.0122 258.37)",
+          "oklch(95% 0.0055 258.37)"
+        ]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Pale Focus Blue",
+        "tonalRamp": [
+          "oklch(15% 0.0577 260.54)",
+          "oklch(26% 0.0843 260.54)",
+          "oklch(38% 0.1024 260.54)",
+          "oklch(50% 0.1085 260.54)",
+          "oklch(62% 0.1024 260.54)",
+          "oklch(74% 0.0843 260.54)",
+          "oklch(86% 0.0548 260.54)",
+          "oklch(95% 0.0246 260.54)"
+        ]
+      },
+      "action": {
+        "role": "primary",
+        "displayName": "Understated Action Blue",
+        "tonalRamp": [
+          "oklch(15% 0.0506 257.36)",
+          "oklch(26% 0.0739 257.36)",
+          "oklch(38% 0.0897 257.36)",
+          "oklch(50% 0.0951 257.36)",
+          "oklch(62% 0.0897 257.36)",
+          "oklch(74% 0.0739 257.36)",
+          "oklch(86% 0.0480 257.36)",
+          "oklch(95% 0.0216 257.36)"
+        ]
+      },
+      "green": {
+        "role": "semantic",
+        "displayName": "Healthy Green",
+        "tonalRamp": [
+          "oklch(15% 0.0578 164.30)",
+          "oklch(26% 0.0844 164.30)",
+          "oklch(38% 0.1025 164.30)",
+          "oklch(50% 0.1087 164.30)",
+          "oklch(62% 0.1025 164.30)",
+          "oklch(74% 0.0844 164.30)",
+          "oklch(86% 0.0549 164.30)",
+          "oklch(95% 0.0246 164.30)"
+        ]
+      },
+      "red": {
+        "role": "semantic",
+        "displayName": "Recording and Error Red",
+        "tonalRamp": [
+          "oklch(15% 0.0585 15.92)",
+          "oklch(26% 0.0854 15.92)",
+          "oklch(38% 0.1038 15.92)",
+          "oklch(50% 0.1100 15.92)",
+          "oklch(62% 0.1038 15.92)",
+          "oklch(74% 0.0854 15.92)",
+          "oklch(86% 0.0556 15.92)",
+          "oklch(95% 0.0249 15.92)"
+        ]
+      },
+      "amber": {
+        "role": "semantic",
+        "displayName": "Notice Amber",
+        "tonalRamp": [
+          "oklch(15% 0.0451 81.61)",
+          "oklch(26% 0.0658 81.61)",
+          "oklch(38% 0.0799 81.61)",
+          "oklch(50% 0.0847 81.61)",
+          "oklch(62% 0.0799 81.61)",
+          "oklch(74% 0.0658 81.61)",
+          "oklch(86% 0.0428 81.61)",
+          "oklch(95% 0.0192 81.61)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Page Headline",
+        "purpose": "Compact page title; 1.4rem at the phone breakpoint."
+      },
+      "body": {
+        "displayName": "System Sans Body",
+        "purpose": "Traditional Chinese operational UI with a 15px root."
+      },
+      "media-time": {
+        "displayName": "Media Time",
+        "purpose": "Medium-weight tabular time labels."
+      }
+    },
+    "shadows": [
+      {
+        "name": "dialog",
+        "value": "0 24px 80px #0009",
+        "purpose": "Modal settings, preview and confirmation surfaces."
+      },
+      {
+        "name": "toast",
+        "value": "0 10px 40px #0008",
+        "purpose": "Floating notification surface."
+      }
+    ],
+    "motion": [
+      {
+        "name": "dialog-enter",
+        "value": "180ms cubic-bezier(.16,1,.3,1)",
+        "purpose": "Translate Y from 8px to 0 on open; removed for reduced motion."
+      },
+      {
+        "name": "audio-level",
+        "value": "width 120ms ease-out",
+        "purpose": "Audio meter level updates; removed for reduced motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "three-columns",
+        "value": "1050px"
+      },
+      {
+        "name": "phone",
+        "value": "700px"
+      }
+    ],
+    "focus": {
+      "control": "2px solid var(--accent); outline-offset: 4px",
+      "media-selection": "2px solid var(--accent); outline-offset: 3px"
+    },
+    "backdrop": "#06090dbc",
+    "tonalRampPolicy": "Synthesized OKLCH preview ramps only. Normative source colors are the DESIGN.md frontmatter values; ramps are not shipped application tokens.",
+    "sourceEvidence": [
+      "camera-ui.css :root, controls, header/navigation, media grid, dialogs, toast, keyframes and media queries",
+      "camera-ui.js inline SVG, shared header, settings showModal and notification lifecycle",
+      "camera-library.js real thumbnail/fallback, selection, preview and restore states",
+      "live.html, snapshots.html, recordings.html shared asset references"
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Shipped primary action, with source hover, focus, pressed and disabled styles.",
+      "html": "<button type=\"button\" class=\"ds-button-primary\">儲存設定</button>",
+      "css": ".ds-button-primary{font:inherit;font-family:system-ui, -apple-system, \"Noto Sans TC\", sans-serif;font-size:15px;line-height:1.55;min-height:42px;padding:9px 15px;border:1px solid var(--line,#343d4a);border-radius:9px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap;background:var(--action,#294d80);border-color:#456da4;color:var(--text,#edf0f5);}.ds-button-primary:active{background:#303b4c;}.ds-button-primary:hover{background:#355f98;border-color:#69788c;}.ds-button-primary:focus-visible{outline:2px solid var(--accent,#91baff);outline-offset:4px;}.ds-button-primary:disabled{opacity:.45;cursor:not-allowed;}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Shipped secondary action, with source hover, focus, pressed and disabled styles.",
+      "html": "<button type=\"button\" class=\"ds-button-secondary\">取消</button>",
+      "css": ".ds-button-secondary{font:inherit;font-family:system-ui, -apple-system, \"Noto Sans TC\", sans-serif;font-size:15px;line-height:1.55;min-height:42px;padding:9px 15px;border:1px solid var(--line,#343d4a);border-radius:9px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap;background:transparent;color:var(--text,#edf0f5);}.ds-button-secondary:hover{background:var(--raised,#232a35);border-color:#69788c;}.ds-button-secondary:active{background:#303b4c;}.ds-button-secondary:focus-visible{outline:2px solid var(--accent,#91baff);outline-offset:4px;}.ds-button-secondary:disabled{opacity:.45;cursor:not-allowed;}"
+    },
+    {
+      "name": "Quiet Button",
+      "kind": "button",
+      "refersTo": "button-quiet",
+      "description": "Shipped quiet action, with source hover, focus, pressed and disabled styles.",
+      "html": "<button type=\"button\" class=\"ds-button-quiet\">更新來源</button>",
+      "css": ".ds-button-quiet{font:inherit;font-family:system-ui, -apple-system, \"Noto Sans TC\", sans-serif;font-size:15px;line-height:1.55;min-height:42px;padding:9px 15px;border:1px solid var(--line,#343d4a);border-radius:9px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap;background:transparent;color:var(--muted,#a8b2c1);border-color:transparent;}.ds-button-quiet:hover{background:var(--raised,#232a35);border-color:#69788c;}.ds-button-quiet:active{background:#303b4c;}.ds-button-quiet:focus-visible{outline:2px solid var(--accent,#91baff);outline-offset:4px;}.ds-button-quiet:disabled{opacity:.45;cursor:not-allowed;}"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Shipped danger action, with source hover, focus, pressed and disabled styles.",
+      "html": "<button type=\"button\" class=\"ds-button-danger\">刪除</button>",
+      "css": ".ds-button-danger{font:inherit;font-family:system-ui, -apple-system, \"Noto Sans TC\", sans-serif;font-size:15px;line-height:1.55;min-height:42px;padding:9px 15px;border:1px solid var(--line,#343d4a);border-radius:9px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap;background:transparent;color:var(--red,#ff989f);border-color:#764249;}.ds-button-danger:active{background:#303b4c;}.ds-button-danger:hover{background:#3e252b;border-color:#69788c;}.ds-button-danger:focus-visible{outline:2px solid var(--accent,#91baff);outline-offset:4px;}.ds-button-danger:disabled{opacity:.45;cursor:not-allowed;}"
+    },
+    {
+      "name": "Date Field",
+      "kind": "input",
+      "refersTo": "date-field",
+      "description": "Native date filter; the preview carries no invented sample dates.",
+      "html": "<select class=\"ds-date\" aria-label=\"日期\"><option>全部日期</option></select>",
+      "css": ".ds-date{font-family:system-ui, -apple-system, \"Noto Sans TC\", sans-serif;font-size:15px;line-height:1.55;color:var(--text,#edf0f5);background:var(--surface,#191e26);border:1px solid var(--line,#343d4a);border-radius:8px;min-height:42px;padding:8px 12px;min-width:0;max-width:100%;color-scheme:dark;accent-color:var(--accent,#91baff);caret-color:var(--accent,#91baff);}.ds-date:focus-visible{outline:2px solid var(--accent,#91baff);outline-offset:4px;}"
+    },
+    {
+      "name": "Three-Route Navigation",
+      "kind": "nav",
+      "refersTo": "nav-current",
+      "description": "Muted resting links and a tonal current-route state; responsive full-width phone row.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"主要導覽\"><a href=\"/\" aria-current=\"page\">即時監看</a><a href=\"/snapshots.html\">快照</a><a href=\"/recordings.html\">錄影</a></nav>",
+      "css": ".ds-nav{display:flex;align-items:center;gap:5px;font-family:system-ui, -apple-system, \"Noto Sans TC\", sans-serif;font-size:15px;line-height:1.55;}.ds-nav a{padding:9px 16px;border-radius:8px;text-decoration:none;color:var(--muted,#a8b2c1);}.ds-nav a:hover{background:var(--surface,#191e26);color:var(--text,#edf0f5);}.ds-nav a[aria-current=\"page\"]{background:var(--raised,#232a35);color:var(--text,#edf0f5);}.ds-nav a:focus-visible{outline:2px solid var(--accent,#91baff);outline-offset:4px;}@media(max-width:700px){.ds-nav{width:100%;}.ds-nav a{text-align:center;flex:1;padding:8px;}}"
+    },
+    {
+      "name": "Unavailable Media Frame",
+      "kind": "card",
+      "refersTo": "media-frame",
+      "description": "Actual unavailable-preview treatment, without invented imagery, date, duration or file size. Normal media replaces this fallback with its real thumbnail.",
+      "html": "<article class=\"ds-media-item\"><button class=\"ds-media-frame\" type=\"button\" aria-label=\"無法預覽\" disabled><span class=\"ds-media-placeholder\"><svg class=\"ds-media-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"5\" width=\"13\" height=\"14\" rx=\"2\"/><path d=\"m16 10 5-4v12l-5-4\"/></svg><span>無法預覽</span></span></button></article>",
+      "css": ".ds-media-item{min-width:0;position:relative;width:100%;font-family:system-ui, -apple-system, \"Noto Sans TC\", sans-serif;font-size:15px;line-height:1.55;}.ds-media-frame{position:relative;width:100%;min-height:42px;aspect-ratio:16/10;border:0;border-radius:12px;overflow:hidden;background:var(--surface,#191e26);padding:0;display:block;color:var(--muted,#a8b2c1);cursor:pointer;}.ds-media-frame:hover{background:var(--raised,#232a35);}.ds-media-frame:active{background:#303b4c;}.ds-media-frame:focus-visible{outline:2px solid var(--accent,#91baff);outline-offset:4px;}.ds-media-frame:disabled{opacity:1;cursor:not-allowed;}.ds-media-placeholder{position:absolute;inset:0;display:flex;flex-direction:column;gap:7px;align-items:center;justify-content:center;font-size:.85em;}.ds-media-icon{width:29px;height:29px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;}@media(max-width:700px){.ds-media-frame{aspect-ratio:4/3;}}"
+    },
+    {
+      "name": "Settings Dialog Surface",
+      "kind": "custom",
+      "refersTo": "dialog",
+      "description": "Static rendering of the shipped native settings-dialog surface. Production opens a labeled native dialog with showModal(); this specimen has no settings runtime.",
+      "html": "<section class=\"ds-dialog\" role=\"dialog\" aria-labelledby=\"ds-settings-title\"><header class=\"ds-dialog-heading\"><h2 id=\"ds-settings-title\">設定</h2></header><div class=\"ds-dialog-body\"><h3>影像</h3><div class=\"ds-setting-row\"><label for=\"ds-fit\">畫面顯示</label><select id=\"ds-fit\"><option>完整顯示</option><option>填滿畫面</option></select></div></div></section>",
+      "css": ".ds-dialog{font-family:system-ui, -apple-system, \"Noto Sans TC\", sans-serif;font-size:15px;line-height:1.55;color:var(--text,#edf0f5);background:var(--surface,#191e26);border:0;border-radius:16px;padding:0;width:min(600px,calc(100% - 24px));max-height:calc(100dvh - 32px);overflow:auto;box-shadow:0 24px 80px #0009;animation:ds-dialog-enter 180ms cubic-bezier(.16,1,.3,1);}.ds-dialog-heading{padding:22px 24px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;}.ds-dialog-heading h2{margin:0;font-size:1.25em;font-weight:600;}.ds-dialog-body{padding:0 24px 24px;}.ds-dialog-body h3{margin:0;font-size:1em;font-weight:600;}.ds-setting-row{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:16px;}.ds-setting-row select{font:inherit;color:inherit;max-width:65%;min-width:0;min-height:42px;padding:8px 12px;background:var(--surface,#191e26);border:1px solid var(--line,#343d4a);border-radius:8px;color-scheme:dark;}.ds-setting-row select:focus-visible{outline:2px solid var(--accent,#91baff);outline-offset:4px;}@keyframes ds-dialog-enter{from{transform:translateY(8px);}to{transform:translateY(0);}}@media(max-width:700px){.ds-dialog-heading{padding:18px 18px 14px;}.ds-dialog-body{padding:0 18px 18px;}}@media(prefers-reduced-motion:reduce){.ds-dialog{animation:none;}}"
+    },
+    {
+      "name": "Undo Notification",
+      "kind": "custom",
+      "refersTo": "toast",
+      "description": "Persistent undo notification styling. The panel specimen is in flow; production positions it fixed, centered 24px from the bottom (14px on phones).",
+      "html": "<div class=\"ds-toast\" role=\"status\"><span>已移至回收桶</span><button type=\"button\">復原</button></div>",
+      "css": ".ds-toast{display:flex;align-items:center;gap:14px;font-family:system-ui, -apple-system, \"Noto Sans TC\", sans-serif;font-size:13.8px;line-height:1.55;background:var(--raised,#232a35);color:var(--text,#edf0f5);box-shadow:0 10px 40px #0008;border-radius:12px;padding:10px 12px 10px 18px;width:max-content;max-width:calc(100% - 28px);}.ds-toast>span{overflow-wrap:anywhere;}.ds-toast button{font:inherit;font-family:system-ui, -apple-system, \"Noto Sans TC\", sans-serif;font-size:15px;line-height:1.55;min-height:42px;padding:9px 15px;border:1px solid var(--line,#343d4a);border-radius:9px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap;background:transparent;border-color:transparent;color:var(--accent,#91baff);}.ds-toast button:hover{background:var(--raised,#232a35);border-color:#69788c;}.ds-toast button:active{background:#303b4c;}.ds-toast button:focus-visible{outline:2px solid var(--accent,#91baff);outline-offset:4px;}@media(max-width:700px){.ds-toast{gap:8px;}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Existing dark utility interface",
+    "overview": "This is the confirmed incumbent identity, recorded from the finished application rather than a new metaphor. Blue-gray grounds, understated blue actions, neutral dividers and semantic green/red states support a compact Traditional Chinese monitoring tool. The media supplies the visual weight; controls remain plain and legible.\n\nThe shared system covers live.html, snapshots.html and recordings.html. It uses one header, three-route navigation and a native settings dialog. It preserves the existing product's practical voice without adding a marketing or display identity.",
+    "keyCharacteristics": [
+      "Dark blue-gray tonal surfaces with restrained blue actions.",
+      "One system sans family, compact headings and tabular media times.",
+      "Open media grids, softly rounded controls and thin dividers.",
+      "Explicit text alongside semantic state and reversible-action feedback."
+    ],
+    "rules": [
+      {
+        "name": "The Labeled State Rule",
+        "body": "Pair connection and recording colors with visible text; color alone does not identify the current state.",
+        "section": "colors"
+      },
+      {
+        "name": "The Overlay Depth Rule",
+        "body": "Reserve the shipped large shadows for modal dialogs and transient notifications; ordinary content uses tonal surfaces and dividers.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do reuse the shared dark palette, system sans stack and restrained semantic states.",
+      "Do preserve visible labels alongside connection and recording state colors.",
+      "Do use real media as content, with explicit fallback labels when previews fail.",
+      "Do carry the shared focus outline, native dialog behavior and reduced-motion overrides into new components.",
+      "Do preserve the two-column phone media grid and reachable navigation/settings pattern."
+    ],
+    "donts": [
+      "Don't introduce a marketing display face or a replacement brand identity.",
+      "Don't add resting card shadows to the open media grid.",
+      "Don't turn synthesized sidecar tonal ramps into additional application tokens."
+    ]
+  }
+}

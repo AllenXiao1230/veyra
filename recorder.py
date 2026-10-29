@@ -10,6 +10,8 @@ import sys
 sys.path.insert(0, "/opt/camera-common")
 from camera_runtime import MJPEGCapture
 from camera_catalog import inspect_recording
+from camera_media import MediaLibrary, media_error, send_file
+from pathlib import Path
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
@@ -33,6 +35,33 @@ motion_enabled = True
 motion_detected = False
 last_motion_at = 0.0
 MOTION_STOP_DELAY = 30.0
+_media_library = None
+
+
+def active_media(name):
+    proc = recorder
+    if proc is None or proc.poll() is not None:
+        return False
+    try:
+        for descriptor in Path(f"/proc/{proc.pid}/fd").iterdir():
+            try:
+                if os.readlink(descriptor) == os.path.join(VIDEO_DIR, name):
+                    return True
+            except OSError:
+                pass
+        # Protect the just-created segment before FFmpeg has opened its output.
+        newest = max((p.name for p in Path(VIDEO_DIR).glob("recording-*.mp4")), default=None)
+        return name == newest
+    except OSError:
+        return True
+
+
+def media_library():
+    global _media_library
+    with lock:
+        if _media_library is None or _media_library.root != Path(VIDEO_DIR):
+            _media_library = MediaLibrary(VIDEO_DIR, "recording", active=active_media, inspect=inspect_recording)
+        return _media_library
 
 
 def json_bytes(data):
@@ -292,7 +321,21 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("JSON 格式錯誤") from exc
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        if path in {"/library", "/trash"} or path.startswith("/thumbnail/"):
+            try:
+                library = media_library()
+                if path == "/library":
+                    self.send_json(200, library.list(parsed.query))
+                elif path == "/trash":
+                    self.send_json(200, {"items": library.list_trash()})
+                else:
+                    send_file(self, library.thumbnail(unquote(path[len("/thumbnail/"):])), "private, max-age=3600")
+            except Exception as exc:
+                media_error(self, exc)
+            return
 
         if path in {"/status", "/health"}:
             with lock:
@@ -410,6 +453,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             payload = self.read_json()
             global motion_enabled
+            if path in {"/trash", "/restore"}:
+                try:
+                    with lock:
+                        library = media_library()
+                        result = (library.move_to_trash(payload.get("filename")) if path == "/trash" else
+                                  library.restore(payload.get("token")))
+                    self.send_json(200, result)
+                except Exception as exc:
+                    media_error(self, exc)
+                return
             if path == "/motion":
                 enabled = payload.get("enabled")
                 if not isinstance(enabled, bool):

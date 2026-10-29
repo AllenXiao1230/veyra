@@ -120,7 +120,10 @@ def backup(dry_run=False):
     except Exception:
         recording = True  # Conservatively omit recently modified media if status is unavailable.
     skipped = [p.name for p in recordings if recording and p.stat().st_mtime > time.time() - 60]
-    for category, source in [("snapshots", DATA / "snapshots"), ("recordings", RECORDINGS)]:
+    for category, source in [("snapshots", DATA / "snapshots"), ("recordings", RECORDINGS),
+                             ("snapshot-trash", DATA / "trash"), ("recording-trash", RECORDINGS / ".trash")]:
+        if not source.is_dir():
+            continue
         target = destination / category
         target.mkdir(mode=0o700)
         command = ["rsync", "-a"]

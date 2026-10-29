@@ -116,6 +116,17 @@ class MaintenanceTests(unittest.TestCase):
             self.assertEqual(command[:4], ["runuser", "-u", "xuan", "--"])
             self.assertEqual(command[-4:], ["systemctl", "--user", "restart", "camera-audio"])
 
+    def test_backup_includes_reversible_trash_receipts_and_media(self):
+        for directory in (self.data / "trash" / "fixture", self.recordings / ".trash" / "fixture"):
+            directory.mkdir(parents=True)
+            (directory / "manifest.json").write_text('{"filename":"fixture"}')
+            (directory / "media.bin").write_bytes(b"recoverable media")
+        with patch.object(m, "http_json", return_value={"recording":False}):
+            destination = Path(m.backup()["path"])
+        for category in ("snapshot-trash", "recording-trash"):
+            self.assertEqual((destination / category / "fixture" / "media.bin").read_bytes(), b"recoverable media")
+            self.assertTrue((destination / category / "fixture" / "manifest.json").is_file())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
