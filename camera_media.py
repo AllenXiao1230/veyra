@@ -14,9 +14,12 @@ from collections import Counter
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, quote
+from camera_state import atomic_json, media_guard, sync_directory
+from camera_index import MediaIndex
+from camera_jobs import ThumbnailJobs
 
 TAIPEI = timezone(timedelta(hours=8))
-_thumbnail_slots = threading.BoundedSemaphore(2)
+_thumbnail_jobs = ThumbnailJobs()
 
 
 class MediaConflict(Exception):
@@ -73,6 +76,9 @@ class MediaLibrary:
         self.active = active or (lambda _: False)
         self.inspect = inspect
         self.lock = threading.RLock()
+        self.recovery_issues = []
+        self.index = MediaIndex(self.root)
+        self.recover()
 
     def valid_name(self, name):
         if not isinstance(name, str) or not name or len(name) > 240 or name.startswith("."):
@@ -80,7 +86,7 @@ class MediaLibrary:
         if any(c in name for c in ("/", "\\", "\0")) or any(ord(c) < 32 for c in name):
             raise ValueError("檔案名稱不正確")
         if self.kind == "recording":
-            valid = re.fullmatch(r"recording-\d{8}-\d{6}\.(mp4|mkv)", name)
+            valid = re.fullmatch(r"recording-\d{8}-\d{6}(?:-[0-9a-f]{12})?\.(mp4|mkv)", name)
         else:
             valid = pathlib.Path(name).suffix.lower() in {".jpg", ".jpeg", ".png"}
         if not valid:
@@ -95,10 +101,23 @@ class MediaLibrary:
             raise FileNotFoundError("找不到檔案，可能已移至回收桶")
         return path
 
-    def event_dates(self):
+    def event_dates(self, details=False):
         if not self.db_path:
             return {}
         with closing(sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True, timeout=5)) as db:
+            columns = {r[1] for r in db.execute("PRAGMA table_info(events)")}
+            if details and {"person_detected", "confidence", "metadata_json"}.issubset(columns):
+                result = {}
+                for row in db.execute("SELECT snapshot_name,id,person_detected,confidence,metadata_json FROM events WHERE snapshot_name != '' ORDER BY id"):
+                    try:
+                        metadata = json.loads(row[4] or "{}")
+                        ready = metadata.get("ai_ready") if isinstance(metadata, dict) else None
+                    except (ValueError, TypeError):
+                        ready = None
+                    result[row[0]] = {"event_id": row[1], "person_detected": bool(row[2]), "confidence": row[3], "ai_ready": ready}
+                return result
+            if details:
+                return {}
             return {name: stamp for name, stamp in db.execute(
                 "SELECT snapshot_name, created_at FROM events WHERE snapshot_name != '' ORDER BY id")}
 
@@ -110,7 +129,7 @@ class MediaLibrary:
             if self.kind == "snapshot" and re.fullmatch(r"event-\d{8}T\d{6}_\d{6}Z.jpg", path.name):
                 return datetime.strptime(path.stem, "event-%Y%m%dT%H%M%S_%fZ").replace(tzinfo=timezone.utc)
             if self.kind == "recording":
-                return datetime.strptime(path.stem, "recording-%Y%m%d-%H%M%S").replace(tzinfo=TAIPEI)
+                return datetime.strptime(path.stem[:25], "recording-%Y%m%d-%H%M%S").replace(tzinfo=TAIPEI)
         except (ValueError, TypeError):
             pass
         return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
@@ -134,26 +153,19 @@ class MediaLibrary:
             except Exception as exc:
                 raise ValueError("分頁位置不正確，請重新整理") from exc
         dates = self.event_dates()
-        rows = []
-        for path in self.root.iterdir():
-            try:
-                self.valid_name(path.name)
-                if path.is_symlink() or not path.is_file():
-                    continue
-                stamp = self.created_at(path, dates)
-                rows.append({"filename": path.name, "created_at": stamp.astimezone(timezone.utc).isoformat(),
-                             "date": stamp.astimezone(TAIPEI).date().isoformat(), "size": path.stat().st_size})
-            except (ValueError, OSError):
-                continue
-        rows.sort(key=lambda r: (r["created_at"], r["filename"]), reverse=True)
-        counts = Counter(r["date"] for r in rows)
-        matched = [r for r in rows if not date or r["date"] == date]
-        remaining = [r for r in matched if cursor is None or [r["created_at"], r["filename"]] < cursor]
-        page = remaining[:limit]
+        page, total, filtered, counts, has_more = self.index.page(self.valid_name, self.created_at, dates, date, cursor, limit)
+        annotations = self.event_dates(details=True)
         for row in page:
             name = row["filename"]
             row["active"] = bool(self.active(name))
             if self.kind == "recording":
+                match = re.search(r"-([0-9a-f]{12})\.mp4$", name)
+                if match:
+                    try:
+                        session = json.loads((self.root / "sessions" / (match[1] + ".json")).read_text())
+                        row.update(session_id=match[1], trigger=session.get("trigger"), event_ids=session.get("event_ids", []))
+                    except (OSError, ValueError):
+                        pass
                 row["url"] = "/recordings-api/file/" + quote(name)
                 row["thumbnail_url"] = "/recordings-api/thumbnail/" + quote(name)
                 if self.inspect:
@@ -162,14 +174,15 @@ class MediaLibrary:
                     except OSError:
                         row.update(health="missing", playable=False, health_message="檔案已移除，請重新整理")
             else:
+                row.update(annotations.get(name, {}))
                 row["url"] = row["thumbnail_url"] = "/ai-api/snapshots/" + quote(name)
         following = None
-        if len(remaining) > limit and page:
+        if has_more and page:
             following = base64.urlsafe_b64encode(json.dumps(
                 [page[-1]["created_at"], page[-1]["filename"]]).encode()).decode().rstrip("=")
-        return {"items": page, "total": len(rows), "filtered_total": len(matched), "next_before": following,
-                "dates": [{"date": day, "count": count} for day, count in sorted(counts.items(), reverse=True)],
-                "trash_count": len(self.list_trash())}
+        return {"items": page, "total": total, "filtered_total": filtered, "next_before": following,
+                "dates": counts,
+                "trash_count": len(self.list_trash()), "recovery_issues": self.recovery_issues}
 
     def receipt(self, token):
         if not isinstance(token, str) or not re.fullmatch(r"[0-9a-f]{32}", token):
@@ -186,9 +199,70 @@ class MediaLibrary:
             raise FileNotFoundError("回收桶檔案不存在")
         return folder, file, data
 
+    def _event_reference(self, receipt, restore):
+        if not self.db_path:
+            return
+        with closing(sqlite3.connect(self.db_path, timeout=5)) as db, db:
+            if restore:
+                for event_id in receipt.get("event_ids", []):
+                    db.execute("UPDATE events SET snapshot_name=? WHERE id=? AND snapshot_name=''",
+                               (receipt["filename"], event_id))
+            else:
+                db.execute("UPDATE events SET snapshot_name='' WHERE snapshot_name=?", (receipt["filename"],))
+
+    def _finish_receipt(self, folder):
+        (folder / "manifest.json").unlink(missing_ok=True)
+        sync_directory(folder)
+        folder.rmdir()
+        sync_directory(self.trash)
+
+    def recover(self):
+        """Reconcile durable rename intents after an interrupted process/transaction."""
+        if not self.trash.is_dir():
+            return []
+        issues = []
+        with self.lock, media_guard(self.root):
+            for folder in self.trash.iterdir():
+                if folder.is_symlink() or not folder.is_dir():
+                    continue
+                try:
+                    data = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+                    self.valid_name(data["filename"])
+                    if data.get("kind") != self.kind or not re.fullmatch(r"[0-9a-f]{32}", folder.name):
+                        raise ValueError("invalid receipt")
+                    original = self.root / data["filename"]
+                    saved = folder / ("media" + pathlib.Path(data["filename"]).suffix.lower())
+                    if original.is_symlink() or saved.is_symlink():
+                        raise ValueError("symbolic link in recovery")
+                    phase = data.get("state", "trashed")
+                    if original.is_file() and not saved.exists():
+                        identity = data.get("identity")
+                        stat = original.stat()
+                        same = identity == [stat.st_dev, stat.st_ino] and stat.st_size == data["size"]
+                        if phase == "preparing_trash":
+                            self._finish_receipt(folder)
+                        elif phase == "restoring" and same:
+                            self._event_reference(data, True)
+                            self._finish_receipt(folder)
+                        else:
+                            raise ValueError("cannot prove ownership of restored file")
+                    elif saved.is_file():
+                        if not original.exists():
+                            self._event_reference(data, False)
+                        if phase != "trashed":
+                            data["state"] = "trashed"
+                            atomic_json(folder / "manifest.json", data)
+                    else:
+                        raise FileNotFoundError("receipt media missing")
+                except (OSError, ValueError, KeyError, sqlite3.Error) as error:
+                    issues.append({"token": folder.name, "error": str(error)})
+        self.recovery_issues = issues
+        return issues
+
     def list_trash(self):
         if not self.trash.exists():
             return []
+        self.recover()
         result = []
         with self.lock:
             for folder in self.trash.iterdir():
@@ -200,7 +274,7 @@ class MediaLibrary:
         return sorted(result, key=lambda r: r["deleted_at"], reverse=True)
 
     def move_to_trash(self, name):
-        with self.lock:
+        with self.lock, media_guard(self.root):
             source = self.file(name)
             if self.active(name):
                 raise MediaConflict("此影片正在錄影，請完成錄影後再刪除")
@@ -209,16 +283,20 @@ class MediaLibrary:
             folder = self.trash / token
             folder.mkdir(mode=0o700)
             destination = folder / ("media" + source.suffix.lower())
-            receipt = {"token": token, "kind": self.kind, "filename": name,
-                       "deleted_at": datetime.now(timezone.utc).isoformat(), "size": source.stat().st_size,
+            stat = source.stat()
+            receipt = {"token": token, "kind": self.kind, "filename": name, "state": "preparing_trash",
+                       "identity": [stat.st_dev, stat.st_ino],
+                       "deleted_at": datetime.now(timezone.utc).isoformat(), "size": stat.st_size,
                        "event_ids": []}
             db = sqlite3.connect(self.db_path, timeout=5) if self.db_path else None
             try:
                 if db:
                     db.execute("BEGIN IMMEDIATE")
                     receipt["event_ids"] = [r[0] for r in db.execute("SELECT id FROM events WHERE snapshot_name=?", (name,))]
-                (folder / "manifest.json").write_text(json.dumps(receipt), encoding="utf-8")
+                atomic_json(folder / "manifest.json", receipt)
                 source.rename(destination)
+                sync_directory(source.parent)
+                sync_directory(destination.parent)
                 if db:
                     db.execute("UPDATE events SET snapshot_name='' WHERE snapshot_name=?", (name,))
                     db.commit()
@@ -234,19 +312,27 @@ class MediaLibrary:
             finally:
                 if db:
                     db.close()
+            receipt["state"] = "trashed"
+            atomic_json(folder / "manifest.json", receipt)
             return {"ok": True, "token": token, "filename": name, "message": "已移到回收桶"}
 
     def restore(self, token):
-        with self.lock:
+        with self.lock, media_guard(self.root):
             folder, source, receipt = self.receipt(token)
             destination = self.root / receipt["filename"]
             if destination.exists() or destination.is_symlink():
                 raise MediaConflict("同名檔案已存在，無法覆蓋復原")
+            receipt["state"] = "restoring"
+            stat = source.stat()
+            receipt["identity"] = [stat.st_dev, stat.st_ino]
+            atomic_json(folder / "manifest.json", receipt)
             db = sqlite3.connect(self.db_path, timeout=5) if self.db_path else None
             try:
                 if db:
                     db.execute("BEGIN IMMEDIATE")
                 source.rename(destination)
+                sync_directory(source.parent)
+                sync_directory(destination.parent)
                 if db:
                     for event_id in receipt["event_ids"]:
                         db.execute("UPDATE events SET snapshot_name=? WHERE id=? AND snapshot_name=''",
@@ -257,12 +343,13 @@ class MediaLibrary:
                     db.rollback()
                 if destination.exists():
                     destination.rename(source)
+                receipt["state"] = "trashed"
+                atomic_json(folder / "manifest.json", receipt)
                 raise
             finally:
                 if db:
                     db.close()
-            (folder / "manifest.json").unlink()
-            folder.rmdir()
+            self._finish_receipt(folder)
             return {"ok": True, "filename": receipt["filename"], "message": "已復原"}
 
     def thumbnail(self, name):
@@ -277,9 +364,7 @@ class MediaLibrary:
             target = cache / (digest + ".jpg")
         if target.is_file():
             return target
-        if not _thumbnail_slots.acquire(timeout=15):
-            raise MediaConflict("縮圖處理中，請稍後重試")
-        try:
+        def generate():
             if target.is_file():
                 return target
             result = subprocess.run(["/usr/bin/ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
@@ -292,5 +377,7 @@ class MediaLibrary:
             temporary.write_bytes(result.stdout)
             os.replace(temporary, target)
             return target
-        finally:
-            _thumbnail_slots.release()
+        try:
+            return _thumbnail_jobs.get(str(target), generate)
+        except (RuntimeError, TimeoutError) as error:
+            raise MediaConflict("縮圖處理中，請稍後重新整理") from error

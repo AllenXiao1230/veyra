@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#101216"><title>備份管理 · Camera Monitor</title>
+  <link rel="stylesheet" href="/camera-ui.css?v=hybrid1">
+  <script src="/camera-ui.js?v=hybrid1" defer></script>
+  <script src="/camera-backups.js?v=hybrid1" defer></script>
+</head>
+<body data-page="backups">
+  <header class="app-header" id="appHeader"></header>
+  <main>
+    <div class="page-heading"><div class="heading-label"><h1>備份管理</h1><span class="count" id="backupCount">讀取中</span></div><button id="backupCreate" class="primary" type="button" disabled><span data-icon="download"></span>立即備份</button></div>
+    <p class="notice" id="backupRisk" hidden>目前為同磁碟的本機備份，無法防護整顆磁碟故障。</p>
+    <div class="backup-capacity" id="backupCapacity"><span id="backupFree">正在讀取容量…</span><span id="backupUsage"></span></div>
+    <section class="backup-job" id="backupJob" aria-labelledby="backupJobTitle" hidden>
+      <div class="backup-job-heading"><h2 id="backupJobTitle">備份工作</h2><span class="status" id="backupJobState" role="status"></span></div>
+      <p id="backupJobMessage"></p><progress id="backupProgress" aria-label="備份工作進度"></progress>
+      <p class="notice" id="backupJobError" hidden></p><p class="backup-result" id="backupJobResult" hidden></p>
+    </section>
+    <div class="library-toolbar"><div><button id="backupTrash" class="quiet" type="button" aria-pressed="false"><span data-icon="trash"></span><span>回收桶</span></button></div><button id="backupRefresh" type="button"><span data-icon="refresh"></span>重新整理</button></div>
+    <section class="backup-list" id="backupList" aria-label="備份清單" aria-busy="true"><div class="loading-line"></div><div class="loading-line"></div></section>
+    <p class="backup-footnote">移到回收桶仍會占用空間。隔離還原會建立獨立副本，不會覆寫正式資料。</p>
+    <a class="button quiet" href="/">返回即時監看</a>
+  </main>
+</body>
+</html>

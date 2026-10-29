@@ -6,11 +6,17 @@ import signal
 import subprocess
 import threading
 import time
+import math
+import shutil
+import uuid
+import urllib.request
 import sys
-sys.path.insert(0, "/opt/camera-common")
-from camera_runtime import MJPEGCapture
+sys.path.append("/opt/camera-common")
 from camera_catalog import inspect_recording
 from camera_media import MediaLibrary, media_error, send_file
+from camera_state import atomic_json, media_guard
+from camera_http import serve_video
+from camera_storage import media_bytes
 from pathlib import Path
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -22,9 +28,12 @@ VIDEO_DIR = "/var/lib/camera-recorder"
 SOURCE = "http://127.0.0.1:8080/stream"
 RECORDING_SOURCE = "http://127.0.0.1:8093/stream"
 AUDIO_SOURCE = "rtsp://127.0.0.1:8554/mic"
-FILENAME_RE = re.compile(r"^recording-\d{8}-\d{6}\.(mp4|mkv)$")
+FILENAME_RE = re.compile(r"^recording-\d{8}-\d{6}(?:-[0-9a-f]{12})?\.(mp4|mkv)$")
 LOG_FILE = "/var/log/camera-recorder-ffmpeg.log"
 lock = threading.RLock()
+operation_lock = threading.RLock()
+session_lock = threading.RLock()
+action_gate = threading.Lock()
 recorder = None
 started_at = None
 last_error = None
@@ -37,6 +46,99 @@ motion_detected = False
 last_motion_at = 0.0
 MOTION_STOP_DELAY = 30.0
 _media_library = None
+recording_trigger = None
+active_session_id = None
+session_created_at = None
+session_event_ids = []
+motion_suppressed = False
+detection_detail = {}
+MIN_FREE_MB = 1024
+MAX_STORAGE_MB = 0
+
+
+def load_settings():
+    global motion_enabled, MOTION_STOP_DELAY, MIN_FREE_MB, MAX_STORAGE_MB
+    path = Path(VIDEO_DIR) / "settings.json"
+    if path.exists():
+        data = json.loads(path.read_text())
+        if type(data.get("motion_enabled")) is not bool:
+            raise ValueError("錄影設定格式錯誤")
+        delay = data.get("stop_delay", 30)
+        reserve = data.get("min_free_mb", 1024)
+        if type(delay) is not int or not 5 <= delay <= 600 or type(reserve) is not int or not 256 <= reserve <= 102400:
+            raise ValueError("錄影設定範圍錯誤")
+        motion_enabled, MOTION_STOP_DELAY, MIN_FREE_MB = data["motion_enabled"], delay, reserve
+        quota = data.get("max_storage_mb", 0)
+        if type(quota) is not int or not 0 <= quota <= 104857600:
+            raise ValueError("錄影容量上限範圍錯誤")
+        MAX_STORAGE_MB = quota
+
+
+def configure_motion(payload):
+    global motion_enabled, MOTION_STOP_DELAY, MIN_FREE_MB, MAX_STORAGE_MB
+    with media_guard(VIDEO_DIR), lock:
+        enabled = payload.get("enabled", motion_enabled)
+        delay = payload.get("stop_delay", int(MOTION_STOP_DELAY))
+        reserve = payload.get("min_free_mb", MIN_FREE_MB)
+        quota = payload.get("max_storage_mb", MAX_STORAGE_MB)
+        if type(quota) is not int or not 0 <= quota <= 104857600:
+            raise ValueError("錄影容量上限須為 0–104857600 MB，0 表示不限")
+        if type(enabled) is not bool or type(delay) is not int or not 5 <= delay <= 600:
+            raise ValueError("啟用狀態必須為布林值，停止延遲須為 5–600 秒")
+        if type(reserve) is not int or not 256 <= reserve <= 102400:
+            raise ValueError("保留空間須為 256–102400 MB")
+        atomic_json(Path(VIDEO_DIR) / "settings.json", {"motion_enabled": enabled, "stop_delay": delay, "min_free_mb": reserve, "max_storage_mb": quota})
+        motion_enabled, MOTION_STOP_DELAY, MIN_FREE_MB = enabled, delay, reserve
+        MAX_STORAGE_MB = quota
+
+
+def persist_session(finished=False):
+    with session_lock:
+        with lock:
+            sid = active_session_id
+            if not sid:
+                return
+            data = {"id": sid, "trigger": recording_trigger, "started_at": session_created_at,
+                    "state": recording_state, "event_ids": list(session_event_ids), "last_error": last_error}
+        path = Path(VIDEO_DIR) / "sessions" / (sid + ".json")
+        if path.exists():
+            previous = json.loads(path.read_text())
+            if "ended_at" in previous:
+                data["ended_at"] = previous["ended_at"]
+        if finished:
+            data["ended_at"] = time.time()
+        data["files"] = sorted(p.name for p in Path(VIDEO_DIR).glob(f"recording-*-{sid}.mp4"))
+        with media_guard(VIDEO_DIR):
+            atomic_json(path, data)
+
+
+def background_action(action):
+    if not action_gate.acquire(blocking=False):
+        return False
+    def run():
+        try:
+            action()
+        except Exception as error:
+            print("recording action failed: " + str(error), flush=True)
+        finally:
+            action_gate.release()
+    threading.Thread(target=run, name="recording-action", daemon=True).start()
+    return True
+
+
+def check_recording_capacity():
+    global last_error, recording_state
+    if is_recording() and storage_exhausted():
+        stop_recording()
+        with lock:
+            last_error = "已停止錄影：磁碟保留空間或錄影容量上限已達；請管理資料或調整設定。"
+            recording_state = "failed"
+        persist_session(finished=True)
+
+
+def storage_exhausted():
+    return (shutil.disk_usage(VIDEO_DIR).free < MIN_FREE_MB * 1024 * 1024 or
+            bool(MAX_STORAGE_MB and media_bytes(VIDEO_DIR) >= MAX_STORAGE_MB * 1024 * 1024))
 
 
 def active_media(name):
@@ -51,7 +153,8 @@ def active_media(name):
             except OSError:
                 pass
         # Protect the just-created segment before FFmpeg has opened its output.
-        newest = max((p.name for p in Path(VIDEO_DIR).glob("recording-*.mp4")), default=None)
+        pattern = f"recording-*-{active_session_id}.mp4" if active_session_id else "recording-*.mp4"
+        newest = max((p.name for p in Path(VIDEO_DIR).glob(pattern)), default=None)
         return name == newest
     except OSError:
         return True
@@ -59,10 +162,11 @@ def active_media(name):
 
 def media_library():
     global _media_library
-    with lock:
-        if _media_library is None or _media_library.root != Path(VIDEO_DIR):
-            _media_library = MediaLibrary(VIDEO_DIR, "recording", active=active_media, inspect=inspect_recording)
-        return _media_library
+    if _media_library is None or _media_library.root != Path(VIDEO_DIR):
+        candidate = MediaLibrary(VIDEO_DIR, "recording", active=active_media, inspect=inspect_recording)
+        with lock:
+            _media_library = candidate
+    return _media_library
 
 
 def json_bytes(data):
@@ -109,18 +213,36 @@ def watch_progress(proc, ready):
                 last_error = recorder_error(proc)
                 recording_state = "failed"
                 started_at = None
+        if recorder is proc and not getattr(proc, "_camera_expected_stop", False):
+            persist_session(finished=True)
     finally:
         proc.stdout.close()
         proc._camera_log.close()
 
 
-def start_recording():
-    global recorder, started_at, last_error, recording_state
-    with lock:
+def start_recording(trigger="manual"):
+    global recorder, started_at, last_error, recording_state, recording_trigger
+    global active_session_id, session_created_at, session_event_ids
+    with operation_lock:
+        if trigger == "motion" and (not motion_enabled or motion_suppressed):
+            return False, "自動觸發已暫停"
         if recorder is not None and recorder.poll() is None:
+            if trigger == "manual":
+                recording_trigger = "manual"
+                persist_session()
             return False, "錄影已在進行中"
 
         os.makedirs(VIDEO_DIR, exist_ok=True)
+        if storage_exhausted():
+            last_error = "磁碟保留空間或錄影容量上限已達，錄影未啟動；請管理資料或調整設定。"
+            recording_state = "failed"
+            raise RuntimeError(last_error)
+        with lock:
+            active_session_id = uuid.uuid4().hex[:12]
+            session_created_at = time.time()
+            session_event_ids = []
+            recording_trigger = trigger
+            recording_state = "starting"
         # Check that the camera stream is reachable before starting FFmpeg.
         try:
             import urllib.request
@@ -136,13 +258,13 @@ def start_recording():
             raise RuntimeError(last_error) from exc
 
         output = os.path.join(
-            VIDEO_DIR, "recording-%Y%m%d-%H%M%S.mp4"
+            VIDEO_DIR, "recording-%Y%m%d-%H%M%S-" + active_session_id + ".mp4"
         )
         cmd = [
             "/usr/bin/ffmpeg",
             "-hide_banner", "-nostdin", "-loglevel", "warning",
             "-progress", "pipe:1", "-stats_period", "0.5", "-nostats",
-            "-y",
+            "-n",
             "-vaapi_device", "/dev/dri/renderD128",
 
             "-thread_queue_size", "512",
@@ -184,13 +306,11 @@ def start_recording():
         log_start = log.tell()
         recording_state = "starting"
         try:
-            recorder = subprocess.Popen(
-                cmd,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=log,
-                start_new_session=True, text=True, bufsize=1
-            )
+            with media_guard(VIDEO_DIR):
+                recorder = subprocess.Popen(
+                    cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=log,
+                    start_new_session=True, text=True, bufsize=1
+                )
         except Exception:
             recording_state = "failed"
             log.close()
@@ -199,8 +319,10 @@ def start_recording():
         recorder._camera_log = log
         recorder._camera_log_start = log_start
         recorder._camera_expected_stop = False
+        persist_session()
         ready = threading.Event()
-        threading.Thread(target=watch_progress, args=(recorder, ready), daemon=True).start()
+        recorder._camera_watcher = threading.Thread(target=watch_progress, args=(recorder, ready), daemon=True)
+        recorder._camera_watcher.start()
         deadline = time.monotonic() + 15
         while not ready.is_set() and recorder.poll() is None and time.monotonic() < deadline:
             ready.wait(0.1)
@@ -213,21 +335,27 @@ def start_recording():
                 except subprocess.TimeoutExpired:
                     recorder.kill()
                     recorder.wait(timeout=3)
+            recorder._camera_watcher.join(timeout=5)
             last_error = recorder_error(recorder)
             recording_state = "failed"
+            persist_session(finished=True)
             raise RuntimeError(last_error)
         recording_state = "recording"
         started_at = time.time()
         last_error = None
+        persist_session()
         return True, "錄影已啟動"
 
 
 def stop_recording():
     global recorder, started_at, last_error, recording_state
-    with lock:
+    with operation_lock:
         proc = recorder
         if proc is None or proc.poll() is not None:
             is_recording()
+            watcher = getattr(proc, "_camera_watcher", None) if proc is not None else None
+            if watcher:
+                watcher.join(timeout=5)
             recorder = None
             started_at = None
             return False, "目前沒有正在執行的錄影"
@@ -245,6 +373,9 @@ def stop_recording():
                 proc.kill()
                 proc.wait(timeout=5)
         finally:
+            watcher = getattr(proc, "_camera_watcher", None)
+            if watcher:
+                watcher.join(timeout=5)
             log = getattr(proc, "_camera_log", None)
             if log:
                 log.close()
@@ -257,6 +388,7 @@ def stop_recording():
             recording_state = "failed"
         else:
             last_error = None
+        persist_session(finished=True)
         return True, "錄影已停止"
 
 
@@ -355,6 +487,17 @@ class Handler(BaseHTTPRequestHandler):
                     "frame_age_seconds": round(time.monotonic() - last_frame_tick, 2) if last_frame_tick else None,
                     "motion_enabled": motion_enabled,
                     "motion_detected": motion_detected,
+                    "stop_delay": int(MOTION_STOP_DELAY),
+                    "min_free_mb": MIN_FREE_MB,
+                    "max_storage_mb": MAX_STORAGE_MB,
+                    "recording_trigger": recording_trigger if active or recording_state in {"starting", "stopping"} else None,
+                    "session_id": active_session_id if active else None,
+                    "motion_suppressed": motion_suppressed,
+                    "stop_in_seconds": math.ceil(max(0, MOTION_STOP_DELAY - (time.monotonic() - last_motion_at)))
+                        if active and recording_trigger == "motion" and last_motion_at else None,
+                    "detection": detection_detail,
+                    "active_files": [p.name for p in Path(VIDEO_DIR).glob("recording-*.mp4") if active_media(p.name)]
+                        if recorder is not None and recorder.poll() is None else [],
                     "started_at": (
                         datetime.fromtimestamp(started_at).astimezone().isoformat(
                             timespec="seconds"
@@ -378,74 +521,27 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": "不合法的檔案名稱"})
                 return
 
-            file_path = os.path.join(VIDEO_DIR, name)
             try:
-                size = os.path.getsize(file_path)
-                if not os.path.isfile(file_path):
-                    raise FileNotFoundError
-            except OSError:
-                self.send_json(404, {"error": "找不到錄影檔"})
-                return
-
-            # Support byte ranges for browser seeking.
-            start, end = 0, size - 1
-            status = 200
-            range_header = self.headers.get("Range")
-            if range_header:
-                match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip())
-                if not match:
-                    self.send_response(416)
-                    self.send_header("Content-Range", f"bytes */{size}")
-                    self.end_headers()
-                    return
-                a, b = match.groups()
-                if not a and not b:
-                    self.send_response(416)
-                    self.send_header("Content-Range", f"bytes */{size}")
-                    self.end_headers()
-                    return
-                if not a:
-                    count = int(b)
-                    start = max(0, size - count)
-                else:
-                    start = int(a)
-                    end = min(int(b), size - 1) if b else size - 1
-                if start >= size or start > end:
-                    self.send_response(416)
-                    self.send_header("Content-Range", f"bytes */{size}")
-                    self.end_headers()
-                    return
-                status = 206
-
-            length = max(0, end - start + 1)
-            self.send_response(status)
-            self.send_header("Content-Type", "video/mp4" if name.endswith(".mp4") else "video/x-matroska")
-            self.send_header("Content-Length", str(length))
-            self.send_header("Accept-Ranges", "bytes")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header(
-                "Content-Disposition",
-                f'inline; filename="{name}"'
-            )
-            if status == 206:
-                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
-            self.end_headers()
-
-            try:
-                with open(file_path, "rb") as f:
-                    f.seek(start)
-                    remaining = length
-                    while remaining:
-                        chunk = f.read(min(1024 * 1024, remaining))
-                        if not chunk:
-                            break
-                        self.wfile.write(chunk)
-                        remaining -= len(chunk)
-            except (BrokenPipeError, ConnectionResetError):
-                pass
+                serve_video(self, media_library().file(name))
+            except (OSError, ValueError) as error:
+                media_error(self, error)
             return
 
         self.send_json(404, {"error": "找不到 API 路徑"})
+
+    def do_HEAD(self):
+        path = urlparse(self.path).path
+        if not path.startswith("/file/"):
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        try:
+            serve_video(self, media_library().file(unquote(path[6:])), head=True)
+        except (OSError, ValueError):
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
     def do_POST(self):
         path = urlparse(self.path).path
@@ -456,42 +552,30 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(403, {"error": "origin rejected"})
                 return
             payload = self.read_json()
-            global motion_enabled
+            global motion_enabled, motion_suppressed
             if path in {"/trash", "/restore"}:
                 try:
-                    with lock:
-                        library = media_library()
-                        result = (library.move_to_trash(payload.get("filename")) if path == "/trash" else
-                                  library.restore(payload.get("token")))
+                    library = media_library()
+                    result = (library.move_to_trash(payload.get("filename")) if path == "/trash" else
+                              library.restore(payload.get("token")))
                     self.send_json(200, result)
                 except Exception as exc:
                     media_error(self, exc)
                 return
             if path == "/motion":
-                enabled = payload.get("enabled")
-                if not isinstance(enabled, bool):
-                    raise ValueError("enabled 必須是布林值")
-                with lock:
-                    motion_enabled = enabled
-                self.send_json(200, {"ok": True, "motion_enabled": enabled,
-                                     "message": "移動偵測已啟用" if enabled else "移動偵測已停用"})
+                configure_motion(payload)
+                self.send_json(200, {"ok": True, "motion_enabled": motion_enabled, "stop_delay": int(MOTION_STOP_DELAY),
+                                     "message": "錄影設定已保存"})
                 return
             if path == "/start":
-                with lock:
-                    previous_motion = motion_enabled
-                    motion_enabled = False
-                    try:
-                        changed, message = start_recording()
-                    except Exception:
-                        motion_enabled = previous_motion
-                        raise
+                changed, message = start_recording(trigger="manual")
                 self.send_json(200, {
                     "ok": True, "recording": is_recording(), "message": message
                 })
                 return
             if path == "/stop":
                 with lock:
-                    motion_enabled = False
+                    motion_suppressed = True
                 changed, message = stop_recording()
                 self.send_json(200, {
                     "ok": True, "recording": False, "message": message
@@ -506,93 +590,66 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def motion_detector_worker():
-    """以 OpenCV 分析 uStreamer 影像；有動作即錄影，靜止 30 秒後停止。"""
-    global motion_enabled, motion_detected, last_motion_at, motion_error, last_frame_tick, last_start_attempt, last_error
-    try:
-        import cv2
-    except ImportError:
-        with lock:
-            last_error = "缺少 OpenCV；請安裝 Ubuntu 套件 python3-opencv"
-        print(f"[motion] {last_error}", flush=True)
-        return
-
-    previous = None
-    consecutive_motion = 0
-    cap = None
+    """Consume the same confirmed motion used for snapshots; AI only annotates."""
+    global motion_detected, last_motion_at, motion_error, last_frame_tick, last_start_attempt
+    global motion_suppressed, detection_detail
+    token = None
+    capacity_checked = 0
     while True:
         try:
-            if cap is None or not cap.isOpened():
-                if cap is not None:
-                    cap.release()
-                cap = MJPEGCapture(SOURCE)
-                if not cap.isOpened():
-                    raise RuntimeError("無法開啟 uStreamer 影像來源")
-                previous = None
-                time.sleep(1)
-                continue
-
-            ok, frame = cap.read()
-            if not ok or frame is None:
-                motion_error = "影像來源中斷，正在重新連線"
-                cap.release()
-                cap = None
-                previous = None
-                time.sleep(2)
-                continue
-
-            frame = cv2.resize(frame, (320, 240), interpolation=cv2.INTER_AREA)
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            gray = cv2.GaussianBlur(gray, (21, 21), 0)
+            if time.monotonic() - capacity_checked > 5:
+                capacity_checked = time.monotonic()
+                if is_recording() and storage_exhausted():
+                    background_action(check_recording_capacity)
+            with urllib.request.urlopen("http://127.0.0.1:8092/status", timeout=3) as response:
+                state = json.load(response)
             now = time.monotonic()
-            last_frame_tick = now
-            motion_error = None
-            detected = False
-            if previous is not None:
-                delta = cv2.absdiff(previous, gray)
-                _, mask = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)
-                mask = cv2.dilate(mask, None, iterations=2)
-                changed_ratio = cv2.countNonZero(mask) / float(mask.size)
-                # 初始門檻：至少約 1.5% 影像像素有明顯變化。
-                detected = changed_ratio >= 0.015
-            previous = gray
-
+            age = state.get("frame_age_seconds")
+            healthy = state.get("healthy") and age is not None and age < 15
+            new_token = (state.get("last_motion_at"), state.get("motion_sequence"))
+            start = stop = remember = False
             with lock:
-                enabled = motion_enabled
-                if detected:
-                    consecutive_motion += 1
+                detection_detail = {k: state.get(k) for k in ("healthy", "person_detector_enabled", "person_detector",
+                                     "ai_inference_ms", "trigger_policy", "last_event_at", "last_event_id")}
+                motion_detected = bool(healthy and state.get("motion_active"))
+                if healthy:
+                    last_frame_tick = now - age
+                    motion_error = None
+                    if not motion_detected and (not last_motion_at or now - last_motion_at >= MOTION_STOP_DELAY):
+                        motion_suppressed = False
                 else:
-                    consecutive_motion = 0
-                # 連續兩張畫面達門檻才算動作，降低單幀雜訊誤觸發。
-                if enabled and consecutive_motion >= 2:
-                    motion_detected = True
+                    motion_error = "共用動作偵測尚未就緒，正在重連"
+                if motion_detected and new_token != token:
+                    token = new_token
                     last_motion_at = now
-                    if not is_recording() and now - last_start_attempt >= 15:
-                        last_start_attempt = now
-                        try:
-                            changed, message = start_recording()
-                            print(f"[motion] {message}", flush=True)
-                        except Exception as exc:
-                            motion_error = f"移動觸發錄影失敗：{exc}"
-                            print(f"[motion] {motion_error}", flush=True)
-                else:
-                    motion_detected = False
-
-                if enabled and is_recording() and last_motion_at and (now - last_motion_at) >= MOTION_STOP_DELAY:
-                    changed, message = stop_recording()
-                    last_motion_at = 0.0
-                    print(f"[motion] 靜止 30 秒，{message}", flush=True)
-                if not enabled:
-                    last_motion_at = 0.0
-            time.sleep(0.15)
+                active = is_recording()
+                if motion_enabled and motion_detected and not motion_suppressed and not active and now - last_start_attempt >= 15:
+                    last_start_attempt = now
+                    start = True
+                if active and recording_trigger == "motion" and last_motion_at and now - last_motion_at >= MOTION_STOP_DELAY:
+                    stop = True
+                event_id = state.get("last_event_id")
+                stamp = state.get("last_event_at")
+                if active and event_id and event_id not in session_event_ids and stamp:
+                    event_time = datetime.fromisoformat(stamp).timestamp()
+                    if session_created_at and event_time >= session_created_at - 2:
+                        session_event_ids.append(event_id)
+                        remember = True
+            if start:
+                background_action(lambda: start_recording(trigger="motion"))
+            if stop:
+                background_action(stop_recording)
+            if remember:
+                persist_session()
+            time.sleep(0.4)
         except Exception as exc:
             with lock:
-                motion_error = f"移動偵測錯誤：{exc}"
-            print(f"[motion] {motion_error}", flush=True)
-            if cap is not None:
-                cap.release()
-                cap = None
-            previous = None
-            time.sleep(3)
+                motion_detected = False
+                motion_error = "無法讀取共用動作偵測：" + str(exc)[-180:]
+            # Quiet countdown remains bounded even while the detector reconnects.
+            if is_recording() and recording_trigger == "motion" and last_motion_at and time.monotonic() - last_motion_at >= MOTION_STOP_DELAY:
+                background_action(stop_recording)
+            time.sleep(1)
 
 
 def graceful_shutdown(signum, frame):
@@ -608,6 +665,8 @@ def graceful_shutdown(signum, frame):
 
 if __name__ == "__main__":
     os.makedirs(VIDEO_DIR, exist_ok=True)
+    load_settings()
+    media_library()
 
     signal.signal(signal.SIGTERM, graceful_shutdown)
     signal.signal(signal.SIGINT, graceful_shutdown)

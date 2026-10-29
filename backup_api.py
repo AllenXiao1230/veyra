@@ -1,0 +1,212 @@
+#!/usr/bin/python3
+"""Loopback-only backup jobs. No live-data restore, purge, shell or arbitrary paths."""
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import signal
+import sys
+import threading
+import time
+import uuid
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse
+
+sys.path.append("/opt/camera-common")
+import camera_maintenance as maintenance
+from camera_backups import BackupStore, verify_backup
+from camera_media import read_body
+from camera_state import atomic_json
+from camera_storage import backup_policy, save_backup_policy
+
+
+class Jobs:
+    def __init__(self, store, create=None):
+        self.store = store
+        self.create = create or maintenance.backup
+        self.directory = store.state / "jobs"
+        self.directory.mkdir(exist_ok=True, mode=0o700)
+        self.lock = threading.Lock()
+        self.audit_lock = threading.Lock()
+        for path in self.directory.glob("*.json"):
+            try:
+                data = json.loads(path.read_text())
+                if data.get("state") in {"queued", "running"}:
+                    data.update(state="interrupted", error="服務曾重新啟動，請重新執行工作", ended_at=time.time())
+                    atomic_json(path, data)
+            except (OSError, ValueError):
+                continue
+
+    def audit(self, action, result, name=None):
+        with self.audit_lock:
+            path = self.store.state / "operations.jsonl"
+            if path.exists() and path.stat().st_size > 5 * 1024 * 1024:
+                os.replace(path, path.with_suffix(".previous.jsonl"))
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({"at": time.time(), "action": action, "name": name, "result": result}, ensure_ascii=False) + "\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+
+    def recent(self):
+        rows = []
+        for path in sorted(self.directory.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:30]:
+            try:
+                rows.append(json.loads(path.read_text()))
+            except (OSError, ValueError):
+                continue
+        return rows
+
+    def get(self, job_id):
+        if not re.fullmatch(r"[0-9a-f]{32}", job_id):
+            raise ValueError("工作編號不正確")
+        return json.loads((self.directory / (job_id + ".json")).read_text())
+
+    def submit(self, action, name=None):
+        if action not in {"create", "verify", "recover"}:
+            raise ValueError("不支援的工作")
+        if action != "create":
+            self.store.folder(name)
+        if not self.lock.acquire(blocking=False):
+            raise RuntimeError("已有備份工作進行中")
+        # Reserve the cross-process lock before acknowledging the request.
+        guard = self.store.mutation()
+        try:
+            guard.__enter__()
+        except Exception:
+            self.lock.release()
+            raise
+        job = {"id": uuid.uuid4().hex, "action": action, "name": name,
+               "state": "queued", "created_at": time.time(), "message": "等待執行", "done_bytes": 0, "total_bytes": 0}
+        path = self.directory / (job["id"] + ".json")
+        try:
+            atomic_json(path, job)
+            self.audit(action, "queued", name)
+        except Exception:
+            guard.__exit__(None, None, None)
+            self.lock.release()
+            raise
+        def worker():
+            last_save = 0
+            def progress(message, done, total):
+                nonlocal last_save
+                job.update(message=message, done_bytes=done, total_bytes=total)
+                if time.monotonic() - last_save >= 0.5 or done == total:
+                    atomic_json(path, job)
+                    last_save = time.monotonic()
+            try:
+                job.update(state="running", started_at=time.time())
+                atomic_json(path, job)
+                if action == "create":
+                    result = {k: v for k, v in self.create(progress=progress).items() if k != "files"}
+                elif action == "verify":
+                    result = verify_backup(self.store.folder(name), progress)
+                else:
+                    result = self.store.recover_isolated(name, progress)
+                job.update(state="complete", result=result, message="已完成")
+            except Exception as error:
+                job.update(state="failed", error=str(error)[-500:], message="工作失敗")
+            finally:
+                job["ended_at"] = time.time()
+                try:
+                    atomic_json(path, job)
+                    self.audit(action, job["state"], name)
+                finally:
+                    guard.__exit__(None, None, None)
+                    self.lock.release()
+        threading.Thread(target=worker, name="backup-job", daemon=True).start()
+        return {"ok": True, "job": dict(job)}
+
+
+class Handler(BaseHTTPRequestHandler):
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(10)
+
+    def send_json(self, status, value):
+        body = json.dumps(value, ensure_ascii=False, allow_nan=False).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def failure(self, error):
+        status = 403 if isinstance(error, PermissionError) else 404 if isinstance(error, FileNotFoundError) else 400 if isinstance(error, (ValueError, UnicodeError)) else 409 if isinstance(error, RuntimeError) else 503
+        self.send_json(status, {"error": str(error) if status != 503 else "備份服務暫時失敗，請稍後重試"})
+
+    def do_GET(self):
+        path = urlparse(self.path).path
+        jobs, store = self.server.jobs, self.server.jobs.store
+        try:
+            if path == "/policy":
+                self.send_json(200, backup_policy(store.state))
+            elif path in {"/health", "/status"}:
+                disk = shutil.disk_usage(store.root)
+                data_disk = shutil.disk_usage(maintenance.DATA)
+                self.send_json(200, {"healthy": True, "jobs": jobs.recent(), "backup_root": str(store.root),
+                                     "external_configured": False,
+                                     "same_device": store.root.stat().st_dev == maintenance.DATA.stat().st_dev,
+                                     "free_bytes": disk.free, "total_bytes": disk.total,
+                                     "data_free_bytes": data_disk.free, "latest": store.latest_name(),
+                                     "retention_days": 0, "permanent_delete_available": False})
+            elif path == "/backups":
+                self.send_json(200, {"items": store.list(), "trash": store.list_trash(), "capacity": store.capacity()})
+            elif path.startswith("/jobs/"):
+                self.send_json(200, jobs.get(path[6:]))
+            else:
+                self.send_json(404, {"error": "找不到 API"})
+        except Exception as error:
+            self.failure(error)
+
+    def do_POST(self):
+        path = urlparse(self.path).path
+        jobs, store = self.server.jobs, self.server.jobs.store
+        try:
+            data = read_body(self)
+            if path == "/policy":
+                with store.mutation():
+                    result = save_backup_policy(store.state, data)
+                    jobs.audit("policy", "complete")
+                self.send_json(200, result)
+                return
+            if path in {"/create", "/verify", "/recover"}:
+                self.send_json(202, jobs.submit(path[1:], data.get("name")))
+                return
+            if path in {"/trash", "/restore"}:
+                with store.mutation():
+                    result = store.move_to_trash(data.get("name")) if path == "/trash" else store.restore(data.get("token"))
+                    jobs.audit(path[1:], "complete", data.get("name") or data.get("token"))
+                self.send_json(200, result)
+                return
+            self.send_json(404, {"error": "找不到 API"})
+        except Exception as error:
+            self.failure(error)
+
+
+def main():
+    os.umask(0o077)
+    store = BackupStore(maintenance.BACKUPS, maintenance.STATE)
+    server = ThreadingHTTPServer(("127.0.0.1", 8095), Handler)
+    server.daemon_threads = True
+    server.jobs = Jobs(store)
+    def stop(*args):
+        threading.Thread(target=server.shutdown, daemon=True).start()
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    try:
+        server.serve_forever(poll_interval=0.5)
+    finally:
+        server.server_close()
+        # Jobs hold the maintenance lock until their durable result is saved.
+        if server.jobs.lock.acquire(timeout=3500):
+            server.jobs.lock.release()
+
+
+if __name__ == "__main__":
+    main()

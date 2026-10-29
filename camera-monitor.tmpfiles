@@ -1,0 +1,2 @@
+d /run/camera-monitor 0755 root root -
+f /run/camera-monitor/media.lock 0444 root root -

@@ -15,9 +15,11 @@ import sqlite3
 import threading
 import time
 import sys
-sys.path.insert(0, "/opt/camera-common")
+sys.path.append("/opt/camera-common")
 from camera_runtime import MJPEGCapture
 from camera_media import MediaLibrary, media_error, read_body, send_file
+from camera_state import media_guard
+from camera_person import PersonAnnotator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -327,10 +329,16 @@ class DetectorService:
         self.store = EventStore(settings.data_dir)
         self.media = MediaLibrary(self.store.snapshots_dir, "snapshot", self.store.db_path)
         self.person_detector = OnnxPersonDetector(settings)
+        if settings.person_detector == "yolox":
+            self.person_detector = PersonAnnotator(settings.onnx_model, settings.person_threshold)
         self.stop_requested = threading.Event()
         self.state_lock = threading.Lock()
         self.last_frame_tick = 0.0
         self.recoveries = 0
+        self.motion_sequence = 0
+        self.motion_active = False
+        self.last_motion_at = None
+        self.last_event_id = None
         self.state: dict[str, Any] = {
             "running": False,
             "stream_connected": False,
@@ -354,6 +362,11 @@ class DetectorService:
             result["healthy"] = bool(result["running"] and result["stream_connected"] and age is not None and age < 15)
             result["recoveries"] = self.recoveries
         result["person_detector_enabled"] = self.person_detector.ready
+        result.update(motion_active=self.motion_active, motion_sequence=self.motion_sequence,
+                      last_motion_at=self.last_motion_at, last_event_id=self.last_event_id,
+                      trigger_policy="motion", person_detector=self.person_detector.reason,
+                      ai_inference_ms=getattr(self.person_detector, "inference_ms", None))
+        result["warmup_remaining"] = getattr(self, "warmup_remaining", self.settings.warmup_frames)
         result["stream_url"] = self.settings.stream_url
         return result
 
@@ -407,15 +420,26 @@ class DetectorService:
                 else:
                     frame = source_frame
                 active, motion_area = analyzer.inspect(frame)
+                self.warmup_remaining = max(0, self.settings.warmup_frames - analyzer.frames_seen)
                 self.update_state(stream_connected=True, last_frame_at=utc_now(), last_error=None)
                 consecutive_motion = consecutive_motion + 1 if active else 0
+                self.motion_active = consecutive_motion >= self.settings.motion_min_frames
+                if self.motion_active:
+                    self.motion_sequence += 1
+                    self.last_motion_at = utc_now()
 
                 now = time.monotonic()
                 if consecutive_motion >= self.settings.motion_min_frames and now - last_event_monotonic >= self.settings.event_cooldown_seconds:
-                    person, confidence, person_count = self.person_detector.detect(frame)
+                    try:
+                        person, confidence, person_count = self.person_detector.detect(frame)
+                    except Exception as error:
+                        # Classification may degrade; it must never gate motion records.
+                        person, confidence, person_count = False, None, 0
+                        self.person_detector.ready = False
+                        self.person_detector.reason = "AI 分類失敗；動作仍會記錄：" + str(error)[-160:]
                     event_type = "person" if person else "motion"
                     # Keep a just-written snapshot and its event indivisible to trash requests.
-                    with self.media.lock:
+                    with self.media.lock, media_guard(self.settings.data_dir):
                         snapshot_name = self.store.save_snapshot(frame, self.settings.jpeg_quality)
                         event_id = self.store.add_event(
                             event_type=event_type,
@@ -423,17 +447,21 @@ class DetectorService:
                             person_detected=person,
                             confidence=confidence,
                             snapshot_name=snapshot_name,
-                            metadata={"person_count": person_count, "capture_width": int(frame.shape[1])},
+                            metadata={"person_count": person_count, "capture_width": int(frame.shape[1]),
+                                      "trigger": "motion", "ai_ready": self.person_detector.ready,
+                                      "ai_status": self.person_detector.reason,
+                                      "motion_sequence": self.motion_sequence},
                         )
                     LOG.info("stored %s event id=%s motion_area=%.1f", event_type, event_id, motion_area)
                     last_event_monotonic = now
+                    self.last_event_id = event_id
                     self.update_state(last_event_at=utc_now())
-                    consecutive_motion = 0
                 self.stop_requested.wait(self.settings.frame_interval_seconds)
         except Exception as exc:  # Keep the HTTP health endpoint alive for diagnostics.
             LOG.exception("detector stopped unexpectedly")
             self.update_state(last_error=str(exc), stream_connected=False)
         finally:
+            self.motion_active = False
             if capture is not None:
                 capture.release()
             self.update_state(running=False)
@@ -463,18 +491,7 @@ class ApiHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def send_snapshot(self, path: Path) -> None:
-        size = path.stat().st_size
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "image/jpeg")
-        self.send_header("Content-Length", str(size))
-        self.send_header("Cache-Control", "private, max-age=60")
-        self.end_headers()
-        try:
-            with path.open("rb") as image:
-                while chunk := image.read(1024 * 1024):
-                    self.wfile.write(chunk)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+        send_file(self, path, "private, max-age=60")
 
     def do_POST(self) -> None:  # noqa: N802
         # Scheme B: reject cached legacy clients before reading or storing a body.
@@ -539,6 +556,7 @@ class ApiHandler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
+    cv2.setNumThreads(2)
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings = Settings.from_file(Path(os.environ.get("CAMERA_AI_CONFIG", "/etc/camera-ai/camera-ai.env")))
     if settings.host not in {"127.0.0.1", "::1"}:

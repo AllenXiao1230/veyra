@@ -15,6 +15,7 @@ remux-check-*/
 *.tar
 *.tar.gz
 *.zip
+*.onnx
 
 # Credentials and machine-local configuration
 .env

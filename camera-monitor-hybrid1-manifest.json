@@ -1,0 +1,271 @@
+{
+  "release": "camera-monitor-hybrid1",
+  "date": "2026-10-29",
+  "files": [
+    {
+      "source": "camera_ai.py",
+      "path": "/opt/camera-ai/camera_ai.py",
+      "sha256": "b52f9352f9ddfa884e6cd28289f8f25764748489a11cfecd8761f3e013d29bd1"
+    },
+    {
+      "source": "recorder.py",
+      "path": "/opt/camera-recorder/server.py",
+      "sha256": "4cce52903caca63081f36cf2efb75409be501480f776b01b2284be15b6132455"
+    },
+    {
+      "source": "timestamp_v2.py",
+      "path": "/opt/camera-timestamp/server.py",
+      "sha256": "23d9802c76dd0779ec1af678b9abb12aff6235724f0e295f33509561027235ff"
+    },
+    {
+      "source": "camera_runtime.py",
+      "path": "/opt/camera-common/camera_runtime.py",
+      "sha256": "d220ef8fa63d8594651a0bc2ab77f9083efbc6c0e6ecb067730174e127d2143c"
+    },
+    {
+      "source": "camera_catalog.py",
+      "path": "/opt/camera-common/camera_catalog.py",
+      "sha256": "6337da99b3b33e91eb987f73b658bbdb2e9aed1e60392ef98a7db00a06855705"
+    },
+    {
+      "source": "wait_ready.py",
+      "path": "/opt/camera-common/wait_ready.py",
+      "sha256": "c7b920f36a779002dfd28afb294280d4addeb90f071fa3096c3054905e6f2b82"
+    },
+    {
+      "source": "camera_maintenance.py",
+      "path": "/usr/local/sbin/camera-maintenance",
+      "sha256": "80ec74c4f940a60d04672952a3e008f05af5a762e1e17322ac8e9bbc2e91f009"
+    },
+    {
+      "source": "live.html",
+      "path": "/var/www/camera-monitor/index.html",
+      "sha256": "f93bcc1786e6da5d0c2d8598184b7f4194412b13faa8f2d2589d5c0011b08656"
+    },
+    {
+      "source": "motion.html",
+      "path": "/var/www/camera-monitor/motion.html",
+      "sha256": "2472e695d2892960929092d3b821dba42114b9d9cd075c77bd87390c2f7f4b83"
+    },
+    {
+      "source": "recordings.html",
+      "path": "/var/www/camera-monitor/recordings.html",
+      "sha256": "7f8c874c9c30f861b0935e3a44d32e1b4f70c9cf776fa51e539be724438d8b5e"
+    },
+    {
+      "source": "camera-ai-events.js",
+      "path": "/var/www/camera-monitor/camera-ai-events.js",
+      "sha256": "5fa8a47866d7e68867b41d84e25f5405dc7fad8335670915b5c9e7569828f7bd"
+    },
+    {
+      "source": "nginx-camera-monitor",
+      "path": "/etc/nginx/sites-enabled/camera-monitor",
+      "sha256": "e8f253462a2f6af910c8ca6fc109e40dd6bfe9bc8b2cb845b79a118d97353f16"
+    },
+    {
+      "source": "camera-recorder.logrotate",
+      "path": "/etc/logrotate.d/camera-recorder",
+      "sha256": "dbb313bc90a0c539452065122d57f5ebf5d730c3ce09a18d44f8931dec45ac2e"
+    },
+    {
+      "source": "camera-monitor-maintenance.json",
+      "path": "/etc/camera-monitor-maintenance.json",
+      "sha256": "6ae22db584f8be6cf679c0bbce1e0519f0ec631b1bc2ccf7bb4a15933ac2ebce"
+    },
+    {
+      "source": "mediamtx-readiness.conf",
+      "path": "/home/xuan/.config/systemd/user/camera-mediamtx.service.d/readiness.conf",
+      "sha256": "ef15abf82a2322bf912402a77463a6a9116a6c4376310b4e6f3c059328c0af18"
+    },
+    {
+      "source": "rollback-core.sh",
+      "path": "/opt/camera-monitor/rollback-core.sh",
+      "sha256": "81e8f6416bd2276275b2fb27a9d33a6b38c79a5362cc550093f109c3cac80cde"
+    },
+    {
+      "source": "README_camera_monitor.md",
+      "path": "/opt/camera-monitor/README.md",
+      "sha256": "546e4304a5f6e3bbc3ed13ee6f51d49ac806bdd28143e3722153ede97b29dadb"
+    },
+    {
+      "source": "camera-health.service",
+      "path": "/etc/systemd/system/camera-health.service",
+      "sha256": "809b87943a71ae493f7a14e66f5460ae8723133e83d9a5ebdf1f103c72172aad"
+    },
+    {
+      "source": "camera-health.timer",
+      "path": "/etc/systemd/system/camera-health.timer",
+      "sha256": "3c62b25eba256bd4bbd145dca8198d62466af7570e2c8b853851253c1246dde3"
+    },
+    {
+      "source": "camera-backup.service",
+      "path": "/etc/systemd/system/camera-backup.service",
+      "sha256": "9453056d23e331dbff2f45c81ee245267a34cd98a502441990db70dce07f498a"
+    },
+    {
+      "source": "camera-backup.timer",
+      "path": "/etc/systemd/system/camera-backup.timer",
+      "sha256": "77026ecdeb90c062efdb79289ccf4ebec913e887f5c08d0d491321e0a38b0cea"
+    },
+    {
+      "source": "camera-cleanup.service",
+      "path": "/etc/systemd/system/camera-cleanup.service",
+      "sha256": "d1243ba874904ecc9951d23f06173f39eb7b76125653d9e8b5005340a721496d"
+    },
+    {
+      "source": "camera-cleanup.timer",
+      "path": "/etc/systemd/system/camera-cleanup.timer",
+      "sha256": "33b9a5b96df1e5a458e6bd4adb36d4387df62b9dbcf50f6f0dcc2e3c5bd351fa"
+    },
+    {
+      "source": "camera_audio.py",
+      "path": "/opt/camera-common/camera_audio.py",
+      "sha256": "5ffae1daf6f809c5b69d70a3059952e39c3f45983f3be4aa76588da57910b46c"
+    },
+    {
+      "source": "camera-audio.service",
+      "path": "/home/xuan/.config/systemd/user/camera-audio.service",
+      "sha256": "71300a6796ecbcd56149161746e7ac958aaac90c493d1aba7ca849d286a02ecc"
+    },
+    {
+      "source": "camera-audio-controls.js",
+      "path": "/var/www/camera-monitor/camera-audio-controls.js",
+      "sha256": "16df9dd219bce09c204a9ca531a10e6d1e9fb215475b3eed88d1547edda56675"
+    },
+    {
+      "source": "nginx-camera-monitor",
+      "path": "/etc/nginx/sites-available/camera-monitor",
+      "sha256": "e8f253462a2f6af910c8ca6fc109e40dd6bfe9bc8b2cb845b79a118d97353f16"
+    },
+    {
+      "source": "camera_media.py",
+      "path": "/opt/camera-common/camera_media.py",
+      "sha256": "3b81479509b4267446a7acd6e47fddc51a55568be770ae0e83929c210503ab0f"
+    },
+    {
+      "source": "snapshots.html",
+      "path": "/var/www/camera-monitor/snapshots.html",
+      "sha256": "f1d315e3b5b61bfbce51bff01439aee1b684317f4d35c2164e2e8cdccbcff4da"
+    },
+    {
+      "source": "camera-ui.css",
+      "path": "/var/www/camera-monitor/camera-ui.css",
+      "sha256": "462b760503198a18402d10abff97b9c5cb132925485bd7b4abf91b36c4ec72d3"
+    },
+    {
+      "source": "camera-ui.js",
+      "path": "/var/www/camera-monitor/camera-ui.js",
+      "sha256": "ad2ab43f46153ccae46ec263c15c92f86e07630babf397363dd0445751ecb4cf"
+    },
+    {
+      "source": "camera-live.js",
+      "path": "/var/www/camera-monitor/camera-live.js",
+      "sha256": "c8d7378d5f0b1180d3f68f03a271dcf4de19b59a5dec1c90a3873fc218718946"
+    },
+    {
+      "source": "camera-library.js",
+      "path": "/var/www/camera-monitor/camera-library.js",
+      "sha256": "a12886317b8cb06a435a525e8cb661bafe216f97dc09b439c2c696eb581993cc"
+    },
+    {
+      "source": "camera_state.py",
+      "path": "/opt/camera-common/camera_state.py",
+      "sha256": "5a9f23a8fcb07f87ccc4c20394777e2f2d23a6055479271b1ec7880b63f3add5"
+    },
+    {
+      "source": "camera_person.py",
+      "path": "/opt/camera-common/camera_person.py",
+      "sha256": "0c95ce3450f4d9b1c1553870f920abf347cb578c9cc59c8b71e5c87a6ff20371"
+    },
+    {
+      "source": "camera_http.py",
+      "path": "/opt/camera-common/camera_http.py",
+      "sha256": "532d23fb72c35e77332f1c5d91329a6a5d481425ca35b5dc1b104c8e1fc1eb6d"
+    },
+    {
+      "source": "camera_backups.py",
+      "path": "/opt/camera-common/camera_backups.py",
+      "sha256": "c411acf7b0417b3140b199127e99c88d6963e174fb0ec38ec98262ed07974141"
+    },
+    {
+      "source": "camera_maintenance.py",
+      "path": "/opt/camera-common/camera_maintenance.py",
+      "sha256": "80ec74c4f940a60d04672952a3e008f05af5a762e1e17322ac8e9bbc2e91f009"
+    },
+    {
+      "source": "camera_index.py",
+      "path": "/opt/camera-common/camera_index.py",
+      "sha256": "f1811b2b75447ac14f0bdb913dcfbd73d5775c8b3c0f14cce5c6cbfda9317c0d"
+    },
+    {
+      "source": "camera_jobs.py",
+      "path": "/opt/camera-common/camera_jobs.py",
+      "sha256": "6eadfd5866ce0eaa8aa4f683be2b9b1309ef2018956c2ed1f2b57b3194b793f6"
+    },
+    {
+      "source": "camera_storage.py",
+      "path": "/opt/camera-common/camera_storage.py",
+      "sha256": "5da4c7b264d5a010c83e255b27884bf597fa91a6b27ab49f3421b0afe3a62e86"
+    },
+    {
+      "source": "backups.html",
+      "path": "/var/www/camera-monitor/backups.html",
+      "sha256": "67947d28eeb60d8ba02fb33338c512c0f422e24566e2e907742f4403f4ac5266"
+    },
+    {
+      "source": "camera-backups.js",
+      "path": "/var/www/camera-monitor/camera-backups.js",
+      "sha256": "1adce5c877b362433047d5000365adcd56b5513f45db2c36beba8afb72dff3cf"
+    },
+    {
+      "source": "camera-recorder-api.service",
+      "path": "/etc/systemd/system/camera-recorder-api.service",
+      "sha256": "e736211aeca245c057ec60248aa58539646f08b22b42f925fdcd0c73392014a7"
+    },
+    {
+      "source": "camera-backup-api.service",
+      "path": "/etc/systemd/system/camera-backup-api.service",
+      "sha256": "f5f007b51c228aef2fd1f985d14a5e5daf6e1dbbc36df108abe291888c36367a"
+    },
+    {
+      "source": "backup_api.py",
+      "path": "/opt/camera-monitor/backup_api.py",
+      "sha256": "29a9facf115bef8e9c23fd8a4c1b7e5c4945f99a954ec3af4173302c9b501bf5"
+    },
+    {
+      "source": "deploy_release.py",
+      "path": "/opt/camera-monitor/deploy_release.py",
+      "sha256": "8c0d31adad129c231778623fbb42aecf7bcd6a27966b7ca4fa5535aa037eb1cc"
+    },
+    {
+      "source": "camera-monitor.tmpfiles",
+      "path": "/etc/tmpfiles.d/camera-monitor.conf",
+      "sha256": "d7ee7715d7bd13cd52990958c2276c82fa9c52409aaa82aba45e7a7919c6b13b"
+    },
+    {
+      "source": "camera-ai.env.example",
+      "path": "/etc/camera-ai/camera-ai.env",
+      "sha256": "39b8e02bde2d1c2875db32078e62b5ede90a74da3b4ec50acb0a692ccfb25f60"
+    },
+    {
+      "source": "models/person-yolox.onnx",
+      "path": "/opt/camera-ai/models/person-yolox.onnx",
+      "sha256": "c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063"
+    },
+    {
+      "source": "models/LICENSE-YOLOX",
+      "path": "/opt/camera-ai/models/LICENSE-YOLOX",
+      "sha256": "0ec3668d3274bcf29e8a29e9576d5a2cd96fc78d3c5bec4387355a796e5d9088"
+    },
+    {
+      "source": "models/person-yolox.json",
+      "path": "/opt/camera-ai/models/person-yolox.json",
+      "sha256": "80d1c0654b5428cd0357cb7a6f283a91bce7a74fc3c271ba094dc85702530d99"
+    },
+    {
+      "source": "CHANGELOG.md",
+      "path": "/opt/camera-monitor/CHANGELOG.md",
+      "sha256": "7d61e74c5cacae91a45b150de0917ad0fde5869cafc04590892e1a9711472b04"
+    }
+  ]
+}

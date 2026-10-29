@@ -8,6 +8,7 @@ import time
 import unittest
 from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 spec = importlib.util.spec_from_file_location("maintenance", Path(__file__).with_name("camera_maintenance.py"))
 m = importlib.util.module_from_spec(spec)
@@ -38,6 +39,14 @@ class MaintenanceTests(unittest.TestCase):
         self.patcher = patch.multiple(m, DATA=self.data, RECORDINGS=self.recordings, CONFIG=self.config,
                                       STATE=self.root / "state", BACKUPS=self.root / "backups")
         self.patcher.start()
+        code = self.root / "camera_ai.py"
+        code.write_text("# fixture")
+        archive = patch.object(m, "configuration_entries", return_value=[(code, "opt/camera-ai/camera_ai.py")])
+        archive.start()
+        self.addCleanup(archive.stop)
+        disk = patch.object(m.shutil, "disk_usage", return_value=SimpleNamespace(total=100*1024**3, used=10*1024**3, free=90*1024**3))
+        disk.start()
+        self.addCleanup(disk.stop)
 
     def tearDown(self):
         self.patcher.stop()
@@ -126,6 +135,32 @@ class MaintenanceTests(unittest.TestCase):
         for category in ("snapshot-trash", "recording-trash"):
             self.assertEqual((destination / category / "fixture" / "media.bin").read_bytes(), b"recoverable media")
             self.assertTrue((destination / category / "fixture" / "manifest.json").is_file())
+
+    def test_backup_skips_active_video_and_keeps_saved_recording_state(self):
+        (self.recordings / "sessions").mkdir()
+        (self.recordings / "sessions" / "session.json").write_text('{"trigger":"motion"}')
+        (self.recordings / "settings.json").write_text('{"motion_enabled":true}')
+        with patch.object(m, "http_json", return_value={"recording":True, "active_files":[self.video.name]}):
+            result = m.backup()
+        folder = Path(result["path"])
+        self.assertEqual(result["skipped_active_recordings"], [self.video.name])
+        self.assertFalse((folder / "recordings" / self.video.name).exists())
+        self.assertTrue((folder / "sessions" / "session.json").is_file())
+        self.assertTrue((folder / "recorder-state" / "settings.json").is_file())
+
+    def test_bind_mount_fallback_keeps_open_inode_after_concurrent_trash(self):
+        import errno
+        finish = m._finish_backup
+        def concurrent_trash(destination, pins, plan, skipped, progress):
+            (self.data / "snapshots" / "old.jpg").rename(self.data / "moved.jpg")
+            return finish(destination, pins, plan, skipped, progress)
+        with patch.object(m, "http_json", return_value={"recording":False}), \
+             patch.object(m.os, "link", side_effect=OSError(errno.EXDEV, "injected bind mount")), \
+             patch.object(m, "_finish_backup", side_effect=concurrent_trash):
+            folder = Path(m.backup()["path"])
+        self.assertEqual((folder / "snapshots" / "old.jpg").read_bytes(), b"fixture")
+        self.assertFalse((folder / "snapshots" / "old.jpg").is_symlink())
+        self.assertTrue((self.data / "moved.jpg").is_file())
 
 
 if __name__ == "__main__":

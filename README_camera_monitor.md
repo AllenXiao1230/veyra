@@ -1,11 +1,29 @@
 # Ubuntu Camera Monitor
 
-> 專案文件版本：2026-10-29 維護修正版（fix1 + audio1）\
+> 專案文件版本：2026-10-29 hybrid1（動作觸發、AI 標註、本機備份管理）\
 > 文件語言：繁體中文\
 > 目前選定架構：**方案 B --- 由 Ubuntu
 > 伺服器獨立執行移動偵測；瀏覽器只負責觀看影像與讀取事件。**
 
 ## 1. 專案目標
+
+### hybrid1 操作與維護
+
+- 錄影容量上限與備份容量預算集中於設定，預設 0 不限。錄影含回收桶計算，每 5 秒檢查；上限達到後停止新增並保留現有檔案。備份預算使用既有實際占用加完整副本估算（含回收桶、快照及 256 MiB 設定預留），因此可能比增量備份所需空間更保守。
+- `.media-index.sqlite3` 為可重建索引，目錄變更立即對帳、持續寫入大小最長約 2 秒更新。影片 `.metadata` 依 stat 保存檢查結果，`.thumbnails` 為縮圖快取；32 件縮圖佇列以 2 個工作者處理並合併同一檔案的要求。快照備份略過可重建索引。
+
+- 即時監看維持音量條與手動錄影。設定 → 錄影可保存動態觸發、動作停止延遲（預設 30 秒）與磁碟保留空間（預設 1024 MB）。手動停止後經完整安靜期才恢復自動觸發；手動開始的錄影由使用者停止。
+- 有動作即記錄；AI 僅分類是否有人。人形模型停用或失效不影響動作觸發。快照與錄影共用 8092 的偵測狀態。快照冷卻 15 秒、初始暖機約 30 秒、連續 3 個有效動作影格後觸發。
+- 設定 → 備份管理（`/backups.html`）提供建立、驗證、回收桶／復原與隔離還原；工作可關閉頁面後繼續，重新開啟會顯示進度。API 位於 loopback 8095，由 nginx 的 `/backups-api/` 代理。
+- 備份根目錄 `/var/backups/camera-monitor/snapshots`；操作與工作紀錄 `/var/lib/camera-maintenance`；隔離還原 `/var/lib/camera-maintenance/recoveries`。隔離還原會複製檔案，不套用設定或覆寫正式資料；設定 tar 僅保留，不自動解開。回收桶仍占空間，沒有永久清除功能。
+- 同磁碟備份無法防護磁碟故障。依使用者決定，先完成本機管理，外部目的地稍後設定。建立前需至少 20 GiB 可用；隔離還原需資料量加 1 GiB。
+- 備份短暫鎖定媒體變動與資料庫備份以固定一致版本，複製與 SHA-256 校驗於鎖外進行；錄製中的片段會略過並列出。舊備份首次驗證建立雜湊基準，無法證明該基準建立前的完整性。
+- 錄影設定 `/var/lib/camera-recorder/settings.json`；每次錄影的觸發來源與事件 ID 位於 `sessions/`。檔名增加 12 位識別碼，舊檔仍支援。
+- 模型來源與雜湊見 `models/person-yolox.json`，授權 `models/LICENSE-YOLOX`。權重不放 Git；部署前下載至 staging 的 `models/person-yolox.onnx` 並驗證固定雜湊。推論在本機 CPU，未上傳畫面。
+- `camera-recorder-api` 使用專用 `camera-recorder` 帳號及 render/video 群組；`camera-backup-api` 需要 root 讀取服務設定與執行備份，只接受本機連線及固定管理動作。
+- 部署：`sudo python3 deploy_release.py --stage <staging> --manifest <staging>/camera-monitor-hybrid1-manifest.json`。腳本驗證所有雜湊、拒絕錄影中部署，保存本版程式／設定、建立共用鎖、啟動服務並檢查健康；失敗自動回滾。
+- 手動回滾：`sudo python3 /opt/camera-monitor/deploy_release.py --rollback /var/backups/camera-monitor/releases/<本版備份名稱>`。先停止錄影；只還原程式與部署設定，保留媒體、SQLite 與使用者錄影設定。回滾時請用 staging 的腳本副本，避免腳本本身被移除後無法再次執行。
+- 測試：Ubuntu 安裝 `python3-opencv python3-numpy ffmpeg rsync`，執行 `/usr/bin/python3 -m unittest discover -v`；JavaScript 使用 `node --check`。硬體錄影驗證使用 `verify_meter_timestamp.py`，輸出至隔離目錄，不操作正式錄影 API。完整異動見 `CHANGELOG.md`。
 
 在 Ubuntu 24.04 LTS 主機上建置可長時間執行的攝影機監控服務，讓使用者透過
 iPhone Safari，在 Tailscale 私有網路內遠端觀看即時影像並查閱事件紀錄。

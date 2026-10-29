@@ -32,4 +32,4 @@ for second in (1, 2):
                     "-frames:v", "1", str(folder / f"frame-{second}.png")], check=True, timeout=20)
 subprocess.run(["ffmpeg", "-v", "error", "-i", str(video), "-f", "null", "-"], check=True, timeout=30)
 print(json.dumps({"folder": str(folder), "video": video.name, "metadata": metadata,
-                  "recording_source": recorder.RECORDING_SOURCE, "motion_source": recorder.SOURCE}))
+                  "recording_source": recorder.RECORDING_SOURCE, "motion_source": "http://127.0.0.1:8092/status"}))

@@ -8,6 +8,7 @@ related_targets: ["snapshots.html","recordings.html"]
 # Camera Monitor media management
 
 Mode: Operate. Scope: live.html, snapshots.html, recordings.html and shared settings.
+Extension 2026-10-29: backups.html is a precise local-management extension of the same world. Enter through Settings → 備份管理; use open dated rows with size/status/actions, one primary create action, visible same-disk warning and durable job progress. Settings adds saved quiet-delay/reserve fields. Motion always captures; AI is annotation only. Preserve system tokens and existing routes. Required captures: desktop 1440×1000 and mobile 390×844 for backups/settings/live, plus gallery annotation at those widths.
 The user specified the page structure and confirmed reversible trash. This is a precise extension of the incumbent dark application, built code-first; no new identity or concept tournament is applicable.
 
 ## Direction contract

@@ -1,0 +1,26 @@
+[Unit]
+Description=Camera Recorder Control API
+After=network.target camera-ai.service camera-timestamp.service
+Wants=camera-ai.service camera-timestamp.service
+
+[Service]
+Type=simple
+User=camera-recorder
+Group=camera-recorder
+SupplementaryGroups=render video
+WorkingDirectory=/opt/camera-recorder
+ExecStart=/usr/bin/python3 /opt/camera-recorder/server.py
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=45
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/camera-recorder /var/log/camera-recorder-ffmpeg.log
+RestrictAddressFamilies=AF_INET AF_UNIX
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

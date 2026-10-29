@@ -3,6 +3,9 @@ import json
 import os
 import subprocess
 import threading
+import hashlib
+from pathlib import Path
+from camera_state import atomic_json
 
 _cache = {}
 _lock = threading.Lock()
@@ -13,9 +16,19 @@ def inspect_recording(path, active=False):
         return {"health": "recording", "playable": False, "health_message": "正在錄製，完成後可回放"}
     stat = os.stat(path)
     key = (path, stat.st_mtime_ns, stat.st_size)
+    disk_key = hashlib.sha256(str(key).encode()).hexdigest()
+    saved = Path(path).parent / ".metadata" / (disk_key + ".json")
     with _lock:
         if key in _cache:
             return dict(_cache[key])
+    try:
+        state = json.loads(saved.read_text())
+        if state.get("health") in {"ok", "damaged"}:
+            with _lock:
+                _cache[key] = state
+            return dict(state)
+    except (OSError, ValueError):
+        pass
     try:
         result = subprocess.run(
             ["/usr/bin/ffprobe", "-v", "error", "-show_entries",
@@ -38,4 +51,8 @@ def inspect_recording(path, active=False):
             _cache.clear()
         if state["health"] != "unknown":
             _cache[key] = state
+            try:
+                atomic_json(saved, state)
+            except OSError:
+                pass
     return dict(state)

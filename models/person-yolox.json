@@ -1,0 +1,10 @@
+{
+  "name": "OpenCV Zoo YOLOX_s COCO",
+  "source": "https://github.com/opencv/opencv_zoo/tree/main/models/object_detection_yolox",
+  "download": "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/object_detection_yolox/object_detection_yolox_2022nov.onnx",
+  "sha256": "c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063",
+  "license": "Apache-2.0",
+  "license_file": "LICENSE-YOLOX",
+  "input": "BGR image converted to RGB, aspect-preserving 640x640, top-left pad 114, raw float values",
+  "policy": "Motion always triggers capture; COCO person class 0 only annotates events. Inference failure never blocks motion recording."
+}

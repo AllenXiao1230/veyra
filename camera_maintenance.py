@@ -10,23 +10,23 @@ import sqlite3
 import subprocess
 import tarfile
 import time
+import sys
+import tempfile
+import errno
+from contextlib import closing
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+sys.path.append("/opt/camera-common")
+from camera_state import media_guard, atomic_json
+from camera_backups import index_files
+from camera_storage import check_backup_budget
 
 STATE = pathlib.Path("/var/lib/camera-maintenance")
 BACKUPS = pathlib.Path("/var/backups/camera-monitor/snapshots")
 CONFIG = pathlib.Path("/etc/camera-monitor-maintenance.json")
 DATA = pathlib.Path("/var/lib/camera-ai")
 RECORDINGS = pathlib.Path("/var/lib/camera-recorder")
-
-
-def atomic_json(path, value):
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
-    tmp.chmod(0o600)
-    os.replace(tmp, path)
 
 
 def read_json(path, default):
@@ -83,8 +83,8 @@ def health(repair=False):
     return result
 
 
-def backup(dry_run=False):
-    recordings = [p for p in RECORDINGS.iterdir() if p.is_file()]
+def backup(dry_run=False, progress=None):
+    recordings = [p for p in RECORDINGS.iterdir() if p.is_file() and not p.is_symlink() and p.suffix.lower() in {".mp4", ".mkv"}]
     plan = {"recording_files": len(recordings), "recording_bytes": sum(p.stat().st_size for p in recordings),
             "destination": str(BACKUPS), "deletes_existing_backups": False}
     if dry_run:
@@ -92,56 +92,114 @@ def backup(dry_run=False):
     if shutil.disk_usage(DATA).free < 20 * 1024 ** 3:
         raise RuntimeError("Less than 20 GiB free; backup stopped without deleting data")
     BACKUPS.mkdir(parents=True, exist_ok=True, mode=0o700)
+    extra_bytes = sum(p.stat().st_size for root in (DATA / "snapshots", DATA / "trash", RECORDINGS / ".trash", RECORDINGS / "sessions")
+                      for p in root.rglob("*") if p.is_file() and not p.is_symlink())
+    check_backup_budget(BACKUPS, STATE, plan["recording_bytes"] + extra_bytes + 256 * 1024 ** 2)
     destination = BACKUPS / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     destination.mkdir(mode=0o700)
-    with sqlite3.connect(f"file:{DATA / 'events.sqlite3'}?mode=ro", uri=True) as source:
-        with sqlite3.connect(destination / "events.sqlite3") as target:
-            source.backup(target)
-            assert target.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+    STATE.mkdir(parents=True, exist_ok=True)
+    pins = pathlib.Path(tempfile.mkdtemp(prefix="backup-pins-", dir=STATE))
+    descriptors = []
+    def pin_file(source, target):
+        try:
+            os.link(source, target)
+        except OSError as error:
+            if error.errno != errno.EXDEV:
+                raise
+            # systemd's read-only bind mounts can reject hardlinks across mount
+            # identities on the same disk. Keep the inode open instead; rsync -L
+            # copies its /proc descriptor even if the user trashes the original.
+            descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+            descriptors.append(descriptor)
+            target.symlink_to(f"/proc/{os.getpid()}/fd/{descriptor}")
+    def pin_tree(source, target, only=None):
+        if not source.is_dir():
+            return
+        target.mkdir(mode=0o700)
+        for path in (source.iterdir() if only is not None else source.rglob("*")):
+            if path.name.startswith(".media-index.sqlite3"):
+                continue
+            if path.is_symlink():
+                raise RuntimeError("Cannot back up symbolic links in media")
+            if not path.is_file() or (only is not None and path.name not in only):
+                continue
+            output = target / path.relative_to(source)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            pin_file(path, output)
+    try:
+        # Freeze database + immutable-file identities briefly, then copy without
+        # blocking new events or user trash actions for the duration of rsync.
+        with media_guard(DATA):
+            try:
+                current = http_json("http://127.0.0.1:8091/status")
+            except Exception:
+                current = {"recording": True, "active_files": []}
+            recordings = [p for p in RECORDINGS.iterdir() if p.is_file() and not p.is_symlink() and p.suffix.lower() in {".mp4", ".mkv"}]
+            active = set(current.get("active_files", []))
+            changing = current.get("recording") or current.get("recording_state") in {"starting", "stopping"}
+            skipped = [p.name for p in recordings if p.name in active or (changing and p.stat().st_mtime > time.time() - 60)]
+            with closing(sqlite3.connect(f"file:{DATA / 'events.sqlite3'}?mode=ro", uri=True)) as source:
+                with closing(sqlite3.connect(destination / "events.sqlite3")) as target:
+                    source.backup(target)
+                    assert target.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+            pin_tree(DATA / "snapshots", pins / "snapshots")
+            pin_tree(DATA / "trash", pins / "snapshot-trash")
+            pin_tree(RECORDINGS / ".trash", pins / "recording-trash")
+            pin_tree(RECORDINGS, pins / "recordings", {p.name for p in recordings if p.name not in skipped})
+            pin_tree(RECORDINGS / "sessions", pins / "sessions")
+            settings = RECORDINGS / "settings.json"
+            if settings.is_file() and not settings.is_symlink():
+                (pins / "recorder-state").mkdir()
+                pin_file(settings, pins / "recorder-state" / "settings.json")
+            policy = STATE / "storage-policy.json"
+            if policy.is_file() and not policy.is_symlink():
+                (pins / "maintenance-state").mkdir()
+                pin_file(policy, pins / "maintenance-state" / "storage-policy.json")
+        if progress:
+            progress("封存設定與複製媒體", 0, 0)
+        return _finish_backup(destination, pins, plan, skipped, progress)
+    finally:
+        shutil.rmtree(pins)
+        for descriptor in descriptors:
+            os.close(descriptor)
+
+
+def configuration_entries():
     paths = ["/opt/camera-ai", "/opt/camera-recorder", "/opt/camera-timestamp", "/opt/camera-common", "/opt/camera-monitor",
              "/etc/camera-ai", "/etc/nginx", "/etc/camera-monitor-maintenance.json",
              "/etc/logrotate.d/camera-recorder", "/var/www/camera-monitor",
              "/home/xuan/.config/systemd/user", "/home/xuan/.config/mediamtx", "/home/xuan/.config/camera-monitor",
              "/usr/local/sbin/camera-maintenance"]
     paths += [str(p) for p in pathlib.Path("/etc/systemd/system").glob("camera-*")]
+    return [(pathlib.Path(p), str(p).lstrip("/")) for p in paths if pathlib.Path(p).exists()]
+
+
+def _finish_backup(destination, pins, plan, skipped, progress):
     with tarfile.open(destination / "configuration.tar.gz", "w:gz") as archive:
-        for item in paths:
-            path = pathlib.Path(item)
-            if path.exists():
-                archive.add(path, arcname=str(path).lstrip("/"))
+        for path, name in configuration_entries():
+            archive.add(path, arcname=name)
     with tarfile.open(destination / "configuration.tar.gz") as archive:
         assert "opt/camera-ai/camera_ai.py" in archive.getnames()
     previous = BACKUPS / "latest"
     baseline = previous.resolve() if previous.is_symlink() else None
     if baseline:
         baseline.relative_to(BACKUPS.resolve())
-    try:
-        recording = http_json("http://127.0.0.1:8091/status").get("recording", False)
-    except Exception:
-        recording = True  # Conservatively omit recently modified media if status is unavailable.
-    skipped = [p.name for p in recordings if recording and p.stat().st_mtime > time.time() - 60]
-    for category, source in [("snapshots", DATA / "snapshots"), ("recordings", RECORDINGS),
-                             ("snapshot-trash", DATA / "trash"), ("recording-trash", RECORDINGS / ".trash")]:
-        if not source.is_dir():
-            continue
+    for source in pins.iterdir():
+        category = source.name
         target = destination / category
         target.mkdir(mode=0o700)
-        command = ["rsync", "-a"]
+        command = ["rsync", "-aL"]
         if baseline and (baseline / category).is_dir():
             command.append("--link-dest=" + str(baseline / category))
-        if category == "recordings":
-            command += ["--files-from=-", "--from0"]
-            names = [p.name for p in recordings if p.name not in skipped]
-            subprocess.run(command + [str(source) + "/", str(target) + "/"],
-                           input="\0".join(names).encode() + b"\0", check=True, timeout=1800)
-        else:
-            subprocess.run(command + [str(source) + "/", str(target) + "/"], check=True, timeout=1800)
+        subprocess.run(command + [str(source) + "/", str(target) + "/"], check=True, timeout=1800)
     with sqlite3.connect(f"file:{destination / 'events.sqlite3'}?mode=ro", uri=True) as db:
         missing = [name for (name,) in db.execute("SELECT snapshot_name FROM events")
                    if name and not (destination / "snapshots" / name).is_file()]
         if missing:
             raise RuntimeError("Backup snapshot verification failed")
-    plan.update({"complete": True, "created_at": time.time(), "path": str(destination),
+    files = index_files(destination, progress, STATE / "backup-checksum-cache.json")
+    plan.update({"complete": True, "schema": 2, "files": files, "total_bytes": sum(r["size"] for r in files),
+                 "created_at": time.time(), "path": str(destination),
                  "skipped_active_recordings": skipped})
     atomic_json(destination / "manifest.json", plan)
     temporary_link = BACKUPS / ("latest-" + destination.name)
@@ -209,7 +267,11 @@ def main():
     STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
     lock_name = "check.lock" if args.action == "check" else "data-maintenance.lock"
     with (STATE / lock_name).open("w") as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(json.dumps({"busy": True, "message": "Another maintenance job is already running"}))
+            return
         if args.action == "check":
             result = health(args.repair)
         elif args.action == "backup":

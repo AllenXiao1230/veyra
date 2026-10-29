@@ -103,18 +103,25 @@
   });
   function recorderState(state) {
     const active = state.recording;
+    const transitioning = ["starting", "stopping"].includes(state.recording_state);
     $("recordStatus").dataset.state = active ? "recording" : state.recording_state === "failed" ? "error" : "ok";
-    $("recordStatus").lastElementChild.textContent = active ? "錄影中" : state.motion_enabled ? "動態觸發已開啟" : "尚未錄影";
+    $("recordStatus").lastElementChild.textContent = active ? (state.recording_trigger === "motion" ? "動作錄影中" + (!state.motion_detected && state.stop_in_seconds !== null ? ` · ${state.stop_in_seconds} 秒後停止` : "") : "手動錄影中") : transitioning ? (state.recording_state === "starting" ? "啟動中" : "正在完成影片") : state.motion_enabled ? (state.motion_suppressed ? "待動作結束後恢復觸發" : "動態觸發已開啟") : "動態觸發已停用";
     if (!recordBusy) {
-      $("recordToggle").disabled = false;
+      $("recordToggle").disabled = transitioning;
       $("recordToggle").classList.toggle("danger", active);
       $("recordToggle").innerHTML = ui.icon(active ? "stop" : "record") + `<span>${active ? "停止錄影" : "開始錄影"}</span>`;
+      if (transitioning) $("recordToggle").textContent = state.recording_state === "starting" ? "啟動中…" : "停止中…";
     }
     $("recordWarning").hidden = !state.last_error;
     $("recordWarning").textContent = state.last_error ?
       (/8554|audio|音訊|404/.test(state.last_error) ? "音訊尚未就緒，錄影無法啟動。請到設定檢查麥克風或重啟音訊。" : "錄影失敗，請稍後重試或檢查服務狀態。") : "";
   }
   window.addEventListener("camera-recorder", event => recorderState(event.detail));
+  window.addEventListener("camera-recorder-unavailable", () => {
+    $("recordStatus").dataset.state = "error";
+    $("recordStatus").lastElementChild.textContent = "錄影狀態暫時無法讀取";
+    if (!recordBusy) $("recordToggle").disabled = true;
+  });
   $("recordToggle").addEventListener("click", async () => {
     if (recordBusy) return;
     const stop = !!ui.recorder()?.recording;
@@ -194,12 +201,14 @@
     healthBusy = true;
     try {
       const health = await ui.api("/camera/health", undefined, 5000);
-      if (health.healthy && !imageFailed && image.getAttribute("src")) {
+      if (health.healthy && !imageFailed && image.getAttribute("src") && image.naturalWidth > 0) {
         connected = true;
         retries = 0;
         clearTimeout(connectionTimer);
         $("viewerMessage").hidden = true;
         liveStatus(true, "即時連線");
+      } else if (health.healthy && !imageFailed && Date.now() - lastChange < 8000) {
+        liveStatus(false, "等待影格");
       } else { liveStatus(false, "影像暫停更新"); scheduleRetry(); }
     } catch (_) { liveStatus(false, "影像連線中斷"); scheduleRetry(); }
     finally { healthBusy = false; }
@@ -229,7 +238,7 @@
     clearTimeout(levelTimer);
     if (!event.persisted) { clearInterval(monitorTimer); clearTimeout(retryTimer); clearTimeout(connectionTimer); }
   });
-  window.addEventListener("pageshow", () => { pageGone = false; pollLevel(); });
+  window.addEventListener("pageshow", event => { pageGone = false; pollLevel(); if (event.persisted && !paused) { connect(); checkPreview(); } });
   if (ui.recorder()) recorderState(ui.recorder());
   connect(false);
   checkPreview();

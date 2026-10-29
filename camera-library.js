@@ -55,6 +55,8 @@
   document.body.append(confirmation);
   ui.backdrop(confirmation);
   let pendingDelete = [];
+  let deleting = false;
+  confirmation.addEventListener("cancel", event => { if (deleting) event.preventDefault(); });
   $("cancelDelete").addEventListener("click", () => confirmation.close());
   function confirmDelete(entries) {
     pendingDelete = entries.filter(i => !i.active);
@@ -64,12 +66,15 @@
     $("cancelDelete").focus();
   }
   $("confirmDelete").addEventListener("click", async () => {
+    if (deleting) return;
+    deleting = true;
     const receipts = [];
     const failed = [];
     $("confirmDelete").disabled = true;
     $("cancelDelete").disabled = true;
     try {
       for (const item of pendingDelete) {
+        $("confirmDelete").textContent = `處理中 ${receipts.length + failed.length + 1} / ${pendingDelete.length}`;
         try { receipts.push(await ui.api(base + "/trash", {filename: item.filename})); }
         catch (error) { failed.push(error.message); }
       }
@@ -78,17 +83,28 @@
       selectionMode = false;
       await load(true);
       if (receipts.length) {
-        ui.toast(`已移到回收桶：${receipts.length} ${unit}${noun}${failed.length ? `；${failed.length} 個未完成` : ""}`, async () => {
-          for (const receipt of receipts) await ui.api(base + "/restore", {token: receipt.token});
-          ui.toast("已復原");
+        let remaining = [...receipts];
+        const undo = async () => {
+          const failedReceipts = [];
+          for (const receipt of remaining) {
+            try { await ui.api(base + "/restore", {token: receipt.token}); }
+            catch (_) { failedReceipts.push(receipt); }
+          }
+          remaining = failedReceipts;
+          if (remaining.length) ui.toast(`${remaining.length} 個尚未復原，可重試或到回收桶復原。`, undo, "重試復原");
+          else ui.toast("已復原");
           await load(true);
-        });
+        };
+        ui.toast(`已移到回收桶：${receipts.length} ${unit}${noun}${failed.length ? `；${failed.length} 個未完成，可重新選取重試` : ""}`, undo);
       } else if (failed.length) ui.toast(failed[0]);
     } finally {
+      deleting = false;
+      $("confirmDelete").textContent = "移到回收桶";
       $("confirmDelete").disabled = false;
       $("cancelDelete").disabled = false;
     }
   });
+  confirmation.addEventListener("click", event => { if (deleting && event.target === confirmation) event.stopImmediatePropagation(); }, true);
 
   function updateSelection() {
     $("selectionBar").hidden = !selectionMode;
@@ -152,6 +168,8 @@
     time.dateTime = item.created_at;
     details.append(time);
     if (isRecording) details.append(ui.element("p", "media-size", ui.size(item.size)));
+    if (isRecording && item.trigger) details.append(ui.element("p", "media-size", item.trigger === "motion" ? "動作觸發" : "手動錄影"));
+    if (!isRecording && item.ai_ready !== undefined && item.ai_ready !== null) details.append(ui.element("p", "media-size", item.person_detected ? "AI 偵測到人" : item.ai_ready ? "動作" : "動作 · AI 暫停"));
     const actions = ui.element("div", "media-actions");
     const download = ui.element("a", "button icon-button");
     download.href = item.url;
@@ -270,6 +288,7 @@
         dates = result.dates;
         total = result.filtered_total;
         trashCount = result.trash_count;
+        if (result.recovery_issues?.length) ui.toast(`${result.recovery_issues.length} 個回收桶項目需要檢查，檔案已保留。`);
         next = result.next_before;
       }
       render(additions);
