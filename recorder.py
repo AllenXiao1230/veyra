@@ -17,6 +17,7 @@ from camera_media import MediaLibrary, media_error, send_file
 from camera_state import atomic_json, media_guard
 from camera_http import serve_video
 from camera_storage import media_bytes
+from camera_playback import playback_file
 from pathlib import Path
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -494,7 +495,7 @@ class Handler(BaseHTTPRequestHandler):
                     "session_id": active_session_id if active else None,
                     "motion_suppressed": motion_suppressed,
                     "stop_in_seconds": math.ceil(max(0, MOTION_STOP_DELAY - (time.monotonic() - last_motion_at)))
-                        if active and recording_trigger == "motion" and last_motion_at else None,
+                        if active and recording_trigger == "motion" and last_motion_at and not motion_error else None,
                     "detection": detection_detail,
                     "active_files": [p.name for p in Path(VIDEO_DIR).glob("recording-*.mp4") if active_media(p.name)]
                         if recorder is not None and recorder.poll() is None else [],
@@ -514,7 +515,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, {"recordings": list_recordings()})
             return
 
-        prefix = "/file/"
+        prefix = "/playback/" if path.startswith("/playback/") else "/file/"
         if path.startswith(prefix):
             name = unquote(path[len(prefix):])
             if not FILENAME_RE.fullmatch(name) or "/" in name or "\\" in name:
@@ -522,8 +523,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             try:
-                serve_video(self, media_library().file(name))
-            except (OSError, ValueError) as error:
+                source = media_library().file(name)
+                if prefix == "/playback/":
+                    if active_media(name):
+                        raise ValueError("錄影完成後才可回放")
+                    source = playback_file(source)
+                    media_library().file(name)
+                serve_video(self, source)
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
                 media_error(self, error)
             return
 
@@ -531,14 +538,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_HEAD(self):
         path = urlparse(self.path).path
-        if not path.startswith("/file/"):
+        prefix = "/playback/" if path.startswith("/playback/") else "/file/"
+        if not path.startswith(prefix):
             self.send_response(404)
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
         try:
-            serve_video(self, media_library().file(unquote(path[6:])), head=True)
-        except (OSError, ValueError):
+            name = unquote(path[len(prefix):])
+            source = media_library().file(name)
+            if prefix == "/playback/":
+                if active_media(name):
+                    raise ValueError("錄影尚未完成")
+                source = playback_file(source)
+                media_library().file(name)
+            serve_video(self, source, head=True)
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
             self.send_response(404)
             self.send_header("Content-Length", "0")
             self.end_headers()
@@ -589,11 +604,23 @@ class Handler(BaseHTTPRequestHandler):
 
 
 
+def stop_after_quiet():
+    # A stop may have waited behind startup or another encoder operation. Check
+    # observations again after acquiring the operation lock, before signalling.
+    with operation_lock:
+        with lock:
+            now = time.monotonic()
+            if (recording_trigger != "motion" or motion_detected or motion_error
+                    or not last_frame_tick or now - last_frame_tick >= 3
+                    or not last_motion_at or now - last_motion_at < MOTION_STOP_DELAY):
+                return False, "動作仍在持續或尚未確認安靜"
+        return stop_recording()
+
+
 def motion_detector_worker():
     """Consume the same confirmed motion used for snapshots; AI only annotates."""
     global motion_detected, last_motion_at, motion_error, last_frame_tick, last_start_attempt
     global motion_suppressed, detection_detail
-    token = None
     capacity_checked = 0
     while True:
         try:
@@ -605,28 +632,35 @@ def motion_detector_worker():
                 state = json.load(response)
             now = time.monotonic()
             age = state.get("frame_age_seconds")
-            healthy = state.get("healthy") and age is not None and age < 15
-            new_token = (state.get("last_motion_at"), state.get("motion_sequence"))
+            healthy = bool(state.get("healthy") and age is not None and age < 3
+                           and not state.get("warmup_remaining", 0))
             start = stop = remember = False
             with lock:
                 detection_detail = {k: state.get(k) for k in ("healthy", "person_detector_enabled", "person_detector",
                                      "ai_inference_ms", "trigger_policy", "last_event_at", "last_event_id")}
-                motion_detected = bool(healthy and state.get("motion_active"))
+                confirmed = bool(healthy and (state.get("motion_active") or
+                                 (state.get("motion_age_seconds") is not None and state["motion_age_seconds"] < 1.5)))
+                motion_detected = bool(healthy and (confirmed or state.get("activity_active")))
                 if healthy:
                     last_frame_tick = now - age
+                    if motion_error:
+                        # Unknown observations are never evidence of quiet.
+                        last_motion_at = now
                     motion_error = None
-                    if not motion_detected and (not last_motion_at or now - last_motion_at >= MOTION_STOP_DELAY):
-                        motion_suppressed = False
                 else:
                     motion_error = "共用動作偵測尚未就緒，正在重連"
-                if motion_detected and new_token != token:
-                    token = new_token
                     last_motion_at = now
+                if motion_detected:
+                    last_motion_at = now
+                if healthy and state.get("activity_age_seconds") is not None:
+                    last_motion_at = max(last_motion_at, now - max(0, state["activity_age_seconds"]))
+                if healthy and not motion_detected and (not last_motion_at or now - last_motion_at >= MOTION_STOP_DELAY):
+                    motion_suppressed = False
                 active = is_recording()
-                if motion_enabled and motion_detected and not motion_suppressed and not active and now - last_start_attempt >= 15:
+                if motion_enabled and confirmed and not motion_suppressed and not active and now - last_start_attempt >= 15:
                     last_start_attempt = now
                     start = True
-                if active and recording_trigger == "motion" and last_motion_at and now - last_motion_at >= MOTION_STOP_DELAY:
+                if healthy and active and recording_trigger == "motion" and not motion_detected and last_motion_at and now - last_motion_at >= MOTION_STOP_DELAY:
                     stop = True
                 event_id = state.get("last_event_id")
                 stamp = state.get("last_event_at")
@@ -638,7 +672,7 @@ def motion_detector_worker():
             if start:
                 background_action(lambda: start_recording(trigger="motion"))
             if stop:
-                background_action(stop_recording)
+                background_action(stop_after_quiet)
             if remember:
                 persist_session()
             time.sleep(0.4)
@@ -646,9 +680,7 @@ def motion_detector_worker():
             with lock:
                 motion_detected = False
                 motion_error = "無法讀取共用動作偵測：" + str(exc)[-180:]
-            # Quiet countdown remains bounded even while the detector reconnects.
-            if is_recording() and recording_trigger == "motion" and last_motion_at and time.monotonic() - last_motion_at >= MOTION_STOP_DELAY:
-                background_action(stop_recording)
+                last_motion_at = time.monotonic()
             time.sleep(1)
 
 

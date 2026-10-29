@@ -31,7 +31,7 @@
     $("liveStatus").lastElementChild.textContent = text;
   }
   function scheduleRetry() {
-    if (retryTimer || !ui.preferences().reconnect || paused || document.hidden) return;
+    if (retryTimer || !ui.preferences().reconnect || paused || pageGone || document.hidden) return;
     const delay = Math.min(15000, 1000 * 2 ** Math.min(4, retries++));
     retryTimer = setTimeout(() => { retryTimer = null; connect(); }, delay);
   }
@@ -39,7 +39,7 @@
     clearTimeout(retryTimer);
     clearTimeout(connectionTimer);
     retryTimer = null;
-    if (paused || document.hidden) return;
+    if (paused || pageGone || document.hidden) return;
     connected = false;
     imageFailed = false;
     fingerprint = "";
@@ -48,7 +48,7 @@
     $("viewerMessage").hidden = false;
     $("viewerMessage").textContent = "正在連接攝影機…";
     image.style.objectFit = ui.preferences().fit;
-    if (replace || !image.getAttribute("src")) image.src = "/camera/stream?t=" + Date.now();
+    if (replace || !image.getAttribute("src")) image.src = "/camera/preview?t=" + Date.now();
     connectionTimer = setTimeout(() => { if (!connected) { liveStatus(false, "重新連線中"); scheduleRetry(); } }, 12000);
   }
   image.addEventListener("load", () => {
@@ -112,9 +112,9 @@
       $("recordToggle").innerHTML = ui.icon(active ? "stop" : "record") + `<span>${active ? "停止錄影" : "開始錄影"}</span>`;
       if (transitioning) $("recordToggle").textContent = state.recording_state === "starting" ? "啟動中…" : "停止中…";
     }
-    $("recordWarning").hidden = !state.last_error;
+    $("recordWarning").hidden = !(state.last_error || state.motion_error);
     $("recordWarning").textContent = state.last_error ?
-      (/8554|audio|音訊|404/.test(state.last_error) ? "音訊尚未就緒，錄影無法啟動。請到設定檢查麥克風或重啟音訊。" : "錄影失敗，請稍後重試或檢查服務狀態。") : "";
+      (/8554|audio|音訊|404/.test(state.last_error) ? "音訊尚未就緒，錄影無法啟動。請到設定檢查麥克風或重啟音訊。" : "錄影失敗，請稍後重試或檢查服務狀態。") : state.motion_error ? (active ? "動作偵測暫時中斷，持續錄影並等待恢復。" : "動作偵測暫時無法使用，請檢查服務狀態。") : "";
   }
   window.addEventListener("camera-recorder", event => recorderState(event.detail));
   window.addEventListener("camera-recorder-unavailable", () => {
@@ -159,7 +159,7 @@
     if (levelBusy || pageGone || document.hidden) return;
     clearTimeout(levelTimer);
     levelBusy = true;
-    let delay = 150;
+    let delay = 250;
     try { renderLevel(await ui.api("/audio-api/level", undefined, 5000)); }
     catch (error) { renderLevel(null); $("audioLevelValue").title = error.message; delay = 1000; }
     finally {
@@ -197,35 +197,44 @@
     audioSeen = true;
   });
   async function checkPreview() {
-    if (healthBusy || paused || document.hidden) return;
+    if (healthBusy || paused || pageGone || document.hidden) return;
     healthBusy = true;
     try {
       const health = await ui.api("/camera/health", undefined, 5000);
-      if (health.healthy && !imageFailed && image.getAttribute("src") && image.naturalWidth > 0) {
-        connected = true;
-        retries = 0;
-        clearTimeout(connectionTimer);
-        $("viewerMessage").hidden = true;
+      if (paused || pageGone || document.hidden) return;
+      if (connected && !imageFailed && Date.now() - lastChange < 20000) {
         liveStatus(true, "即時連線");
-      } else if (health.healthy && !imageFailed && Date.now() - lastChange < 8000) {
+      } else if (health.healthy && !imageFailed && Date.now() - lastChange < 20000) {
         liveStatus(false, "等待影格");
       } else { liveStatus(false, "影像暫停更新"); scheduleRetry(); }
-    } catch (_) { liveStatus(false, "影像連線中斷"); scheduleRetry(); }
+    } catch (_) {
+      // A delayed status request says nothing about an MJPEG image that keeps
+      // advancing. Only a failed image or a stalled timestamp needs reconnect.
+      if (!paused && !pageGone && !document.hidden && (imageFailed || Date.now() - lastChange >= 20000)) {
+        liveStatus(false, "影像連線中斷"); scheduleRetry();
+      }
+    }
     finally { healthBusy = false; }
   }
   const monitorTimer = setInterval(() => {
-    if (document.hidden) return;
-    checkPreview();
-    if (!paused && image.naturalWidth && connected) {
+    if (document.hidden || pageGone) return;
+    if (!paused && !imageFailed && image.getAttribute("src") && image.naturalWidth) {
       try {
         painter.drawImage(image, 12, 12, Math.min(450, image.naturalWidth - 12), 48, 0, 0, 160, 40);
         const bytes = painter.getImageData(0, 0, 160, 40).data;
         let hash = 0;
         for (let i = 0; i < bytes.length; i += 16) hash = ((hash << 5) - hash + bytes[i]) | 0;
-        if (String(hash) !== fingerprint) { fingerprint = String(hash); lastChange = Date.now(); }
+        if (String(hash) !== fingerprint) {
+          fingerprint = String(hash); lastChange = Date.now();
+          connected = true; retries = 0;
+          clearTimeout(connectionTimer); clearTimeout(retryTimer); retryTimer = null;
+          $("viewerMessage").hidden = true;
+          liveStatus(true, "即時連線");
+        }
         else if (Date.now() - lastChange > 20000) { liveStatus(false, "影像暫停更新"); scheduleRetry(); }
       } catch (_) {}
     }
+    checkPreview();
   }, 3000);
   document.addEventListener("visibilitychange", () => {
     clearTimeout(levelTimer);
@@ -236,7 +245,8 @@
     image.removeAttribute("src");
     pageGone = true;
     clearTimeout(levelTimer);
-    if (!event.persisted) { clearInterval(monitorTimer); clearTimeout(retryTimer); clearTimeout(connectionTimer); }
+    clearTimeout(retryTimer); retryTimer = null; clearTimeout(connectionTimer);
+    if (!event.persisted) clearInterval(monitorTimer);
   });
   window.addEventListener("pageshow", event => { pageGone = false; pollLevel(); if (event.persisted && !paused) { connect(); checkPreview(); } });
   if (ui.recorder()) recorderState(ui.recorder());

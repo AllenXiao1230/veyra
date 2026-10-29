@@ -1,0 +1,86 @@
+{
+  "release": "camera-monitor-stability1",
+  "date": "2026-10-30",
+  "files": [
+    {
+      "source": "camera_ai.py",
+      "path": "/opt/camera-ai/camera_ai.py",
+      "sha256": "b8acc85c5e574775a0942fbfa74157e1d7308802b58bb791b68791dbc2f6d7df"
+    },
+    {
+      "source": "recorder.py",
+      "path": "/opt/camera-recorder/server.py",
+      "sha256": "17f4e979dd4215f62727022ffcaa3bc0c4148e68afc3bed791a842ccb7cda3ea"
+    },
+    {
+      "source": "timestamp_v2.py",
+      "path": "/opt/camera-timestamp/server.py",
+      "sha256": "ba23369d061c211e28833d78ea829faa2e56ce8b8174865c734e7d07fe11af9b"
+    },
+    {
+      "source": "live.html",
+      "path": "/var/www/camera-monitor/index.html",
+      "sha256": "070b11257338d32925b27f946a74e24f0226bf6d27682b759c16f7d2abd4dce3"
+    },
+    {
+      "source": "recordings.html",
+      "path": "/var/www/camera-monitor/recordings.html",
+      "sha256": "924d7fcb931bf2616617a71b1a2039c9d46459065a78f39d67da86d12b78de51"
+    },
+    {
+      "source": "README_camera_monitor.md",
+      "path": "/opt/camera-monitor/README.md",
+      "sha256": "2e9b5c1918905fcad5a83486b3aed37f8a06aa4b5ea659072eabcc9567ba3518"
+    },
+    {
+      "source": "camera_media.py",
+      "path": "/opt/camera-common/camera_media.py",
+      "sha256": "b5f9681ce9e1de637fecd231e1bda0cc74d874a64abb81889bf2dccec586369f"
+    },
+    {
+      "source": "snapshots.html",
+      "path": "/var/www/camera-monitor/snapshots.html",
+      "sha256": "362a00045dd66c2d1530fe4704c76e6382cddd80ab138665914a1b15526510ed"
+    },
+    {
+      "source": "camera-live.js",
+      "path": "/var/www/camera-monitor/camera-live.js",
+      "sha256": "7c316a2ab2a65e2f3d66e33d0f4d198977a069218bfb1f937f1d97d154f61005"
+    },
+    {
+      "source": "camera-library.js",
+      "path": "/var/www/camera-monitor/camera-library.js",
+      "sha256": "ceb64d72d9e5f99361f97947465fffbfe3a9e17f9962a79829b704e27ff51e1c"
+    },
+    {
+      "source": "camera-recorder-api.service",
+      "path": "/etc/systemd/system/camera-recorder-api.service",
+      "sha256": "1096062eb7406582897b51f8b60131f6d228b67929142e5f532143087a1129a8"
+    },
+    {
+      "source": "deploy_release.py",
+      "path": "/opt/camera-monitor/deploy_release.py",
+      "sha256": "8674f13cb1f6cc0248727c2ae201d1bb50c0cadd327d513e3f78441fdcd510d8"
+    },
+    {
+      "source": "camera-monitor.tmpfiles",
+      "path": "/etc/tmpfiles.d/camera-monitor.conf",
+      "sha256": "8512ed7a7f59d200cd99ad83e14364affc21ff43659d0cc663890b93864f6c07"
+    },
+    {
+      "source": "CHANGELOG.md",
+      "path": "/opt/camera-monitor/CHANGELOG.md",
+      "sha256": "3dd1f7f18984a921da0d5709fbae7683aa1a4b1cdf70e1a79436381a3c4fa979"
+    },
+    {
+      "source": "camera_playback.py",
+      "path": "/opt/camera-common/camera_playback.py",
+      "sha256": "ba5b0d4fb07d6b9c640a5497beca515b5c9c5b01d321d9b349e6a6554e1bed7a"
+    },
+    {
+      "source": "REPAIR_REPORT_20261030.md",
+      "path": "/opt/camera-monitor/REPAIR_REPORT_20261030.md",
+      "sha256": "1bef564527dded9de461de40b4f01272e1112a3e31789092078116d2b1f23660"
+    }
+  ]
+}

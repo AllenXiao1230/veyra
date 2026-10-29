@@ -18,7 +18,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/camera-recorder /var/log/camera-recorder-ffmpeg.log
+ReadWritePaths=/var/lib/camera-recorder /var/log/camera-recorder-ffmpeg.log /var/cache/camera-monitor/playback
 RestrictAddressFamilies=AF_INET AF_UNIX
 LockPersonality=true
 

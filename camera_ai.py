@@ -311,8 +311,17 @@ class MotionAnalyzer:
         self.settings = settings
         self.subtractor = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=20, detectShadows=False)
         self.frames_seen = 0
+        self.previous_gray = None
+        self.activity_active = False
 
     def inspect(self, frame: np.ndarray) -> tuple[bool, float]:
+        gray = cv2.GaussianBlur(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (5, 5), 0)
+        activity_area = 0
+        if self.previous_gray is not None and self.previous_gray.shape == gray.shape:
+            delta = cv2.threshold(cv2.absdiff(gray, self.previous_gray), 18, 255, cv2.THRESH_BINARY)[1]
+            delta = cv2.morphologyEx(delta, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+            activity_area = cv2.countNonZero(delta)
+        self.previous_gray = gray
         foreground = self.subtractor.apply(frame)
         foreground = cv2.morphologyEx(foreground, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
         foreground = cv2.dilate(foreground, None, iterations=2)
@@ -320,6 +329,10 @@ class MotionAnalyzer:
         largest = max((cv2.contourArea(contour) for contour in contours), default=0.0)
         self.frames_seen += 1
         active = self.frames_seen > self.settings.warmup_frames and largest >= self.settings.motion_area_min
+        # A confirmed recording needs a lower continuation threshold than its
+        # trigger. Frame differences also survive MOG2 background adaptation.
+        self.activity_active = (self.frames_seen > self.settings.warmup_frames
+                                and activity_area >= max(64, self.settings.motion_area_min * 0.08))
         return active, float(largest)
 
 
@@ -338,6 +351,9 @@ class DetectorService:
         self.motion_sequence = 0
         self.motion_active = False
         self.last_motion_at = None
+        self.last_motion_tick = 0.0
+        self.last_activity_tick = 0.0
+        self.activity_active = False
         self.last_event_id = None
         self.state: dict[str, Any] = {
             "running": False,
@@ -364,6 +380,9 @@ class DetectorService:
         result["person_detector_enabled"] = self.person_detector.ready
         result.update(motion_active=self.motion_active, motion_sequence=self.motion_sequence,
                       last_motion_at=self.last_motion_at, last_event_id=self.last_event_id,
+                      motion_age_seconds=round(time.monotonic() - self.last_motion_tick, 3) if self.last_motion_tick else None,
+                      activity_active=self.activity_active,
+                      activity_age_seconds=round(time.monotonic() - self.last_activity_tick, 3) if self.last_activity_tick else None,
                       trigger_policy="motion", person_detector=self.person_detector.reason,
                       ai_inference_ms=getattr(self.person_detector, "inference_ms", None))
         result["warmup_remaining"] = getattr(self, "warmup_remaining", self.settings.warmup_frames)
@@ -424,9 +443,13 @@ class DetectorService:
                 self.update_state(stream_connected=True, last_frame_at=utc_now(), last_error=None)
                 consecutive_motion = consecutive_motion + 1 if active else 0
                 self.motion_active = consecutive_motion >= self.settings.motion_min_frames
+                self.activity_active = bool(analyzer.activity_active)
                 if self.motion_active:
                     self.motion_sequence += 1
                     self.last_motion_at = utc_now()
+                    self.last_motion_tick = time.monotonic()
+                if self.activity_active or self.motion_active:
+                    self.last_activity_tick = time.monotonic()
 
                 now = time.monotonic()
                 if consecutive_motion >= self.settings.motion_min_frames and now - last_event_monotonic >= self.settings.event_cooldown_seconds:

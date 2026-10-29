@@ -167,6 +167,7 @@ class MediaLibrary:
                     except (OSError, ValueError):
                         pass
                 row["url"] = "/recordings-api/file/" + quote(name)
+                row["playback_url"] = "/recordings-api/playback/" + quote(name)
                 row["thumbnail_url"] = "/recordings-api/thumbnail/" + quote(name)
                 if self.inspect:
                     try:

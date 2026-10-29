@@ -11,7 +11,7 @@ import subprocess
 import time
 import urllib.request
 
-SERVICES = ["camera-ai", "camera-recorder-api", "camera-backup-api"]
+SERVICES = ["camera-ai", "camera-recorder-api", "camera-backup-api", "camera-timestamp"]
 
 
 def run(*args):
@@ -51,7 +51,7 @@ def install(stage, manifest):
                   "uid": stat.st_uid, "gid": stat.st_gid, "mode": stat.st_mode & 0o777})
     (backup / "rollback.json").write_text(json.dumps(saved, indent=2))
     print("ROLLBACK=" + str(backup), flush=True)
-    run("systemctl", "stop", "camera-recorder-api", "camera-ai")
+    run("systemctl", "stop", "camera-recorder-api", "camera-ai", "camera-timestamp")
     if Path("/etc/systemd/system/camera-backup-api.service").exists():
         run("systemctl", "stop", "camera-backup-api")
     try:
@@ -122,7 +122,7 @@ def rollback(backup):
             path.unlink(missing_ok=True)
     run("systemctl", "daemon-reload")
     run("nginx", "-t")
-    run("systemctl", "start", "camera-ai", "camera-recorder-api")
+    run("systemctl", "start", "camera-ai", "camera-recorder-api", "camera-timestamp")
     if Path("/etc/systemd/system/camera-backup-api.service").exists():
         run("systemctl", "start", "camera-backup-api")
     else:

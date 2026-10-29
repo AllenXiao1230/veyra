@@ -13,3 +13,5 @@ jobs:
         run: /usr/bin/python3 -m unittest discover -v
       - name: JavaScript syntax
         run: for file in *.js; do node --check "$file"; done
+      - name: Preview connection regression
+        run: node test_camera_preview.cjs

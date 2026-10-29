@@ -21,6 +21,8 @@ FPS = max(1, min(30, int(os.environ.get("CAMERA_PREVIEW_FPS", "15"))))
 lock = threading.Condition()
 stop_requested = threading.Event()
 latest_frame = None
+preview_frame = None
+preview_frame_id = 0
 frame_id = 0
 last_frame_tick = 0.0
 last_frame_at = None
@@ -41,6 +43,8 @@ def health():
 
 def capture():
     global latest_frame, frame_id, last_frame_tick, last_frame_at, last_error
+    global preview_frame, preview_frame_id
+    preview_tick = 0.0
     while not stop_requested.is_set():
         cap = None
         try:
@@ -62,9 +66,20 @@ def capture():
                 ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 78])
                 if not ok:
                     raise RuntimeError("Timestamp JPEG encoding failed")
+                small_jpeg = None
+                if time.monotonic() - preview_tick >= 1 / 8:
+                    height, width = frame.shape[:2]
+                    small = cv2.resize(frame, (960, round(height * 960 / width)), interpolation=cv2.INTER_AREA) if width > 960 else frame
+                    success, encoded = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 65])
+                    if success:
+                        small_jpeg = encoded.tobytes()
+                        preview_tick = time.monotonic()
                 with lock:
                     latest_frame = jpeg.tobytes()
                     frame_id += 1
+                    if small_jpeg is not None:
+                        preview_frame = small_jpeg
+                        preview_frame_id += 1
                     last_frame_tick = time.monotonic()
                     last_frame_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
                     last_error = None
@@ -74,6 +89,7 @@ def capture():
             LOG.warning("preview capture reconnecting: %s", exc)
             with lock:
                 latest_frame = None
+                preview_frame = None
                 last_error = str(exc)
                 lock.notify_all()
             stop_requested.wait(2)
@@ -95,7 +111,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        if path != "/stream":
+        if path not in {"/stream", "/preview"}:
             self.send_error(404)
             return
         if not health()["healthy"]:
@@ -108,15 +124,20 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
         previous = -1
+        compact = path == "/preview"
         try:
             while not stop_requested.is_set():
                 with lock:
-                    lock.wait_for(lambda: frame_id != previous or stop_requested.is_set(), timeout=2)
+                    lock.wait_for(lambda: (preview_frame_id if compact else frame_id) != previous or stop_requested.is_set(), timeout=2)
                     if stop_requested.is_set():
                         break
-                    current, frame = frame_id, latest_frame
-                    if frame is None or current == previous or time.monotonic() - last_frame_tick >= 10:
+                    current, frame = (preview_frame_id, preview_frame) if compact else (frame_id, latest_frame)
+                    if frame is None or time.monotonic() - last_frame_tick >= 10:
                         break
+                    if current == previous:
+                        # A short source pause is not EOF. Keep the stream open
+                        # until the same freshness deadline as /health.
+                        continue
                 previous = current
                 self.wfile.write(b"--timestampframe\r\nContent-Type: image/jpeg\r\n" +
                                  f"Content-Length: {len(frame)}\r\n\r\n".encode() + frame + b"\r\n")

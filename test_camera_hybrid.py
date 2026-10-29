@@ -37,6 +37,8 @@ class HybridTests(unittest.TestCase):
         rec.last_motion_at = 0
         rec.last_start_attempt = 0
         rec.motion_suppressed = False
+        rec.motion_error = None
+        rec.motion_detected = False
 
     def tearDown(self):
         self.video_patch.stop()
@@ -132,7 +134,7 @@ class HybridTests(unittest.TestCase):
             rec.recording_trigger = "manual"
             self.assertEqual(self.coordinator_step(state), [])
             rec.recording_trigger = "motion"
-            self.assertEqual(self.coordinator_step(state)[0].args[0], rec.stop_recording)
+            self.assertEqual(self.coordinator_step(state)[0].args[0], rec.stop_after_quiet)
 
     def test_manual_stop_waits_for_a_full_quiet_period_before_rearming(self):
         rec.motion_suppressed = True

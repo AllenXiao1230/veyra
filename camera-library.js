@@ -33,15 +33,15 @@
     $("previewTitle").textContent = ui.day(item.date) + " " + ui.time(item.created_at);
     $("previewDownload").href = item.url;
     $("previewDownload").download = item.filename;
-    $("previewDetails").textContent = isRecording && !item.playable ? item.health_message : ui.size(item.size);
+    $("previewDetails").textContent = isRecording ? (item.playable ? duration(item.duration_seconds) + " · " + ui.size(item.size) : item.health_message) : ui.size(item.size);
     const media = document.createElement(isRecording && item.playable ? "video" : "img");
-    media.src = isRecording && !item.playable ? item.thumbnail_url : item.url;
+    media.src = isRecording ? (item.playable ? item.playback_url || item.url : item.thumbnail_url) : item.url;
     if (media.tagName === "VIDEO") {
       media.controls = true;
       media.playsInline = true;
       media.preload = "metadata";
       media.poster = item.thumbnail_url;
-      media.addEventListener("error", () => { $("previewDetails").textContent = "此瀏覽器無法播放，請下載原檔。"; });
+      media.addEventListener("error", () => { $("previewDetails").textContent = "播放暫時無法開始，請重新開啟或下載原檔。"; });
     }
     else media.alt = noun + " " + ui.time(item.created_at);
     $("previewContent").replaceChildren(media);
@@ -127,7 +127,7 @@
   }
   function duration(seconds) {
     const whole = Math.max(0, Math.floor(seconds || 0));
-    return Math.floor(whole / 60) + ":" + String(whole % 60).padStart(2, "0");
+    return (whole >= 3600 ? Math.floor(whole / 3600) + ":" + String(Math.floor(whole / 60) % 60).padStart(2, "0") : Math.floor(whole / 60)) + ":" + String(whole % 60).padStart(2, "0");
   }
   function card(item) {
     const node = ui.element("article", "media-item");
