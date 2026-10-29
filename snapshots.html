@@ -3,15 +3,17 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#101216"><title>快照 · Camera Monitor</title>
-  <link rel="stylesheet" href="/camera-ui.css?v=hybrid1">
-  <script src="/camera-ui.js?v=hybrid1" defer></script>
-  <script src="/camera-library.js?v=stability1" defer></script>
+  <link rel="stylesheet" href="/camera-ui.css?v=mobile1">
+  <script src="/camera-ui.js?v=mobile1" defer></script>
+  <script src="/camera-library.js?v=mobile1" defer></script>
+  <script src="/camera-timeline.js?v=mobile1" defer></script>
 </head>
 <body data-page="snapshots">
   <header class="app-header" id="appHeader"></header>
   <main>
     <div class="page-heading"><div class="heading-label"><h1 id="libraryTitle">快照</h1><span id="libraryCount" class="count" role="status">讀取中</span></div><button id="trashToggle" class="quiet" type="button"><span data-icon="trash"></span><span>回收桶</span></button></div>
     <div class="library-toolbar">
+      <div class="view-switch" aria-label="瀏覽方式"><a href="/snapshots.html">快照</a><a href="/snapshots.html?view=events">事件時間軸</a></div>
       <div class="filter-group"><label for="mediaDate">日期</label><select id="mediaDate"><option value="">全部日期</option></select></div>
       <div class="toolbar-actions"><button id="selectToggle" type="button">選取</button><button id="libraryRefresh" type="button" aria-label="重新整理快照"><span data-icon="refresh"></span><span class="optional-label">重新整理</span></button></div>
     </div>

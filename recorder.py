@@ -467,7 +467,7 @@ class Handler(BaseHTTPRequestHandler):
                 if path == "/library":
                     self.send_json(200, library.list(parsed.query))
                 elif path == "/trash":
-                    self.send_json(200, {"items": library.list_trash()})
+                    self.send_json(200, library.trash_page(parsed.query) if parsed.query else {"items": library.list_trash()})
                 else:
                     send_file(self, library.thumbnail(unquote(path[len("/thumbnail/"):])), "private, max-age=3600")
             except Exception as exc:
@@ -568,10 +568,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
             payload = self.read_json()
             global motion_enabled, motion_suppressed
-            if path in {"/trash", "/restore"}:
+            if path in {"/trash", "/restore", "/purge", "/batch"}:
                 try:
                     library = media_library()
-                    result = (library.move_to_trash(payload.get("filename")) if path == "/trash" else
+                    result = (library.batch(payload) if path == '/batch' else
+                              library.purge(payload.get('token'), payload.get('confirmation')) if path == '/purge' else
+                              library.move_to_trash(payload.get("filename")) if path == "/trash" else
                               library.restore(payload.get("token")))
                     self.send_json(200, result)
                 except Exception as exc:

@@ -41,6 +41,17 @@ class BackupTests(unittest.TestCase):
         atomic_json(folder / "manifest.json", manifest)
         return folder
 
+    def test_permanent_delete_requires_confirmation_and_stays_inside_trash(self):
+        original = self.fixture()
+        token = self.store.move_to_trash(original.name)['token']
+        with self.assertRaises(ValueError): self.store.purge(token,'yes')
+        self.assertEqual(len(self.store.list_trash()),1)
+        outside = self.root / 'outside'; outside.mkdir(); (outside/'keep').write_text('keep')
+        with self.assertRaises(ValueError): self.store.purge('../outside','永久刪除')
+        self.store.purge(token,'永久刪除')
+        self.assertEqual(self.store.list_trash(),[])
+        self.assertEqual((outside/'keep').read_text(),'keep')
+
     def test_verification_detects_tampering_and_extra_files(self):
         folder = self.fixture()
         self.assertTrue(verify_backup(folder)["ok"])

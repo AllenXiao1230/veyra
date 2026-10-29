@@ -1,0 +1,136 @@
+{
+  "release": "camera-monitor-mobile1",
+  "date": "2026-10-30",
+  "files": [
+    {
+      "source": "camera_ai.py",
+      "path": "/opt/camera-ai/camera_ai.py",
+      "sha256": "b166efb3bea0996e815324509493bbc6736fafa9ead6763691fdf363b35aaf45"
+    },
+    {
+      "source": "recorder.py",
+      "path": "/opt/camera-recorder/server.py",
+      "sha256": "411c08d47ec4e089729fa85ffad9b41213dc7d2a27ee972dee1fb32822de9892"
+    },
+    {
+      "source": "timestamp_v2.py",
+      "path": "/opt/camera-timestamp/server.py",
+      "sha256": "27870caa05fab9fa2183f1655b714c324f5cf28408f3be1db8545c3caefedbae"
+    },
+    {
+      "source": "camera_maintenance.py",
+      "path": "/usr/local/sbin/camera-maintenance",
+      "sha256": "cf2245c0d448ed7781c6ea4ec68061a2242e6ce1ec33a1fa303db6b634f61e17"
+    },
+    {
+      "source": "live.html",
+      "path": "/var/www/camera-monitor/index.html",
+      "sha256": "3a19e6fdd77f7d28bc9334e34f0bf4640ca438b1cefa8eea64640e8557afd495"
+    },
+    {
+      "source": "recordings.html",
+      "path": "/var/www/camera-monitor/recordings.html",
+      "sha256": "c7c474620f646ea1fc446b7b025b39c575e5a238f97401480cd381fec345d02d"
+    },
+    {
+      "source": "camera-ai-events.js",
+      "path": "/var/www/camera-monitor/camera-ai-events.js",
+      "sha256": "f5ff0221bbc966707eb3c66d18a11eeaef231ef350f181ea14ca4b8e9493913e"
+    },
+    {
+      "source": "nginx-camera-monitor",
+      "path": "/etc/nginx/sites-enabled/camera-monitor",
+      "sha256": "2232032df1f05c57848ac0d38413d0489cfe63fcdce8135078d376362de6b44c"
+    },
+    {
+      "source": "README_camera_monitor.md",
+      "path": "/opt/camera-monitor/README.md",
+      "sha256": "e6dbe8de2ca09c45a38b768fa978c8b09f7d06498f92313e45685ca96a606dde"
+    },
+    {
+      "source": "nginx-camera-monitor",
+      "path": "/etc/nginx/sites-available/camera-monitor",
+      "sha256": "2232032df1f05c57848ac0d38413d0489cfe63fcdce8135078d376362de6b44c"
+    },
+    {
+      "source": "camera_media.py",
+      "path": "/opt/camera-common/camera_media.py",
+      "sha256": "cc69866081348d95393261e6d837c3768cab1646e127ab7da191dd785171b8de"
+    },
+    {
+      "source": "snapshots.html",
+      "path": "/var/www/camera-monitor/snapshots.html",
+      "sha256": "180a9dfc206c1ba98d1eb77201568b42cd7eef05ea5d104558a3603dda56ad80"
+    },
+    {
+      "source": "camera-ui.css",
+      "path": "/var/www/camera-monitor/camera-ui.css",
+      "sha256": "ba49e3e009dd953454bf355a18432471b987d3e83181dcae5f33f7dbe6532186"
+    },
+    {
+      "source": "camera-ui.js",
+      "path": "/var/www/camera-monitor/camera-ui.js",
+      "sha256": "a3cbd09eb6f010effd1f0e88bafc7a159571babd06e75a846e7f5a673fabf7fa"
+    },
+    {
+      "source": "camera-live.js",
+      "path": "/var/www/camera-monitor/camera-live.js",
+      "sha256": "7d96f83bbfe7e1e823c13c54f3ff576adea624698949371028a78c42eb49f348"
+    },
+    {
+      "source": "camera-library.js",
+      "path": "/var/www/camera-monitor/camera-library.js",
+      "sha256": "a26084c453e13b77dec8214ae3065a02c86f44401c759cca818dab82626c641f"
+    },
+    {
+      "source": "camera_backups.py",
+      "path": "/opt/camera-common/camera_backups.py",
+      "sha256": "9458d74ab6a39b0d57769ac6ebf4aece002b8c30d7b01c996ca9db1dedec6f6d"
+    },
+    {
+      "source": "camera_maintenance.py",
+      "path": "/opt/camera-common/camera_maintenance.py",
+      "sha256": "cf2245c0d448ed7781c6ea4ec68061a2242e6ce1ec33a1fa303db6b634f61e17"
+    },
+    {
+      "source": "backups.html",
+      "path": "/var/www/camera-monitor/backups.html",
+      "sha256": "820bd077cd9a3940d6c85cb554d010bfc967af32a9075489edced48747f558c0"
+    },
+    {
+      "source": "camera-backups.js",
+      "path": "/var/www/camera-monitor/camera-backups.js",
+      "sha256": "859b95bb180b6a67760819abb8a7bdfebdbe4765c62948e18baaabb902a85d91"
+    },
+    {
+      "source": "backup_api.py",
+      "path": "/opt/camera-monitor/backup_api.py",
+      "sha256": "04b5415e2765cf36c3faa60f9cc4dad74f0f30501e2e6b1b5c4f6cc108f5e4ad"
+    },
+    {
+      "source": "CHANGELOG.md",
+      "path": "/opt/camera-monitor/CHANGELOG.md",
+      "sha256": "ce0c46819fdd7a6cec385c525c07765c704675d62fd49ad839913138ef02d794"
+    },
+    {
+      "source": "camera_timeline.py",
+      "path": "/opt/camera-common/camera_timeline.py",
+      "sha256": "7f885dd1758eb9fae20f87beed46854fe2f35bd6226bd306b65f9207461ef4e0"
+    },
+    {
+      "source": "camera-mobile.js",
+      "path": "/var/www/camera-monitor/camera-mobile.js",
+      "sha256": "ace1d0e41119c9747334d36689d6d4498b904384487b79a4ca719f50588c0bc6"
+    },
+    {
+      "source": "camera-timeline.js",
+      "path": "/var/www/camera-monitor/camera-timeline.js",
+      "sha256": "81c6a00a7ffc3fcdc3c1f28c8d5f065e85ef9bb3009c50caa7469ae805a7f4c6"
+    },
+    {
+      "source": "RELEASE_REPORT_MOBILE_20261030.md",
+      "path": "/opt/camera-monitor/RELEASE_REPORT_MOBILE_20261030.md",
+      "sha256": "e01a43d1716435e6044ece3bb4b1beba981ea1bbd7104ac8257d834cb15fe417"
+    }
+  ]
+}

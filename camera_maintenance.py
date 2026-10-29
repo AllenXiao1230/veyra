@@ -152,8 +152,14 @@ def backup(dry_run=False, progress=None):
                 (pins / "recorder-state").mkdir()
                 pin_file(settings, pins / "recorder-state" / "settings.json")
             policy = STATE / "storage-policy.json"
+            preferences = STATE / 'event-preferences.sqlite3'
+            if preferences.is_file() and not preferences.is_symlink():
+                (pins / 'maintenance-state').mkdir(exist_ok=True)
+                with closing(sqlite3.connect(f'file:{preferences}?mode=ro', uri=True)) as source_db:
+                    with closing(sqlite3.connect(pins / 'maintenance-state' / 'event-preferences.sqlite3')) as backup_db:
+                        source_db.backup(backup_db)
             if policy.is_file() and not policy.is_symlink():
-                (pins / "maintenance-state").mkdir()
+                (pins / "maintenance-state").mkdir(exist_ok=True)
                 pin_file(policy, pins / "maintenance-state" / "storage-policy.json")
         if progress:
             progress("封存設定與複製媒體", 0, 0)

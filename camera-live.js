@@ -21,6 +21,16 @@
   let fingerprint = "";
   let lastChange = Date.now();
   let healthBusy = false;
+  const pull = window.CameraFrames ? new window.CameraFrames() : null;
+  const mobileViewport = window.matchMedia?.('(max-width: 600px), (pointer: coarse) and (max-width: 1024px)');
+  function streamMode() {
+    const mode = ui.preferences().bandwidth || "auto";
+    const network = window.navigator?.connection;
+    return mode === "low" || (mode === "auto" && (mobileViewport?.matches || network?.saveData || /(^|-)2g$|3g/.test(network?.effectiveType || ""))) ? "low" : "standard";
+  }
+  let mode = streamMode();
+  window.navigator?.connection?.addEventListener?.('change', () => { if(!paused && !pageGone && !document.hidden && mode !== streamMode()) connect(); });
+  mobileViewport?.addEventListener?.('change', () => { if(!paused && !pageGone && !document.hidden && mode !== streamMode()) connect(); });
   const canvas = document.createElement("canvas");
   canvas.width = 160;
   canvas.height = 40;
@@ -48,6 +58,21 @@
     $("viewerMessage").hidden = false;
     $("viewerMessage").textContent = "正在連接攝影機…";
     image.style.objectFit = ui.preferences().fit;
+    mode = streamMode();
+    if (mode === "low" && pull) {
+      pull.start(image, () => {
+        lastChange = Date.now(); connected = true; imageFailed = false;
+        $("viewerMessage").hidden = true;
+        liveStatus(true, "低頻寬 · 即時連線");
+      }, () => {
+        connected = false;
+        liveStatus(false, ui.preferences().reconnect ? '影格中斷，正在重試' : '影格中斷');
+        $('viewerMessage').hidden=false;
+        $('viewerMessage').textContent=ui.preferences().reconnect ? '影像更新中斷，正在重新連線…' : '影像更新中斷，請按重新連線。';
+      }, () => ui.preferences().reconnect && !paused && !pageGone && !document.hidden);
+      return;
+    }
+    pull?.stop();
     if (replace || !image.getAttribute("src")) image.src = "/camera/preview?t=" + Date.now();
     connectionTimer = setTimeout(() => { if (!connected) { liveStatus(false, "重新連線中"); scheduleRetry(); } }, 12000);
   }
@@ -58,9 +83,10 @@
     retries = 0;
     clearTimeout(connectionTimer);
     $("viewerMessage").hidden = true;
-    liveStatus(true, "即時連線");
+    liveStatus(true, mode === "low" ? "低頻寬 · 即時連線" : "即時連線");
   });
   image.addEventListener("error", () => {
+    if (mode === "low") return;
     connected = false;
     imageFailed = true;
     if (!paused && !document.hidden) { liveStatus(false, "影像中斷"); scheduleRetry(); }
@@ -78,6 +104,7 @@
     $("previewPause").setAttribute("aria-label", paused ? "恢復預覽" : "暫停預覽");
     $("previewPause").title = paused ? "恢復預覽" : "暫停預覽";
     if (paused) {
+      pull?.stop();
       clearTimeout(connectionTimer);
       clearTimeout(retryTimer);
       retryTimer = null;
@@ -98,6 +125,7 @@
   });
   window.addEventListener("camera-preferences", () => {
     image.style.objectFit = ui.preferences().fit;
+    if (mode !== streamMode() && !paused) { connect(); return; }
     if (!ui.preferences().reconnect) { clearTimeout(retryTimer); retryTimer = null; }
     else if (!connected) scheduleRetry();
   });
@@ -159,7 +187,7 @@
     if (levelBusy || pageGone || document.hidden) return;
     clearTimeout(levelTimer);
     levelBusy = true;
-    let delay = 250;
+    let delay = mode === "low" ? 1000 : 250;
     try { renderLevel(await ui.api("/audio-api/level", undefined, 5000)); }
     catch (error) { renderLevel(null); $("audioLevelValue").title = error.message; delay = 1000; }
     finally {
@@ -178,26 +206,33 @@
       const video = audioVideo();
       if (video) { video.muted = true; video.pause(); }
       wantsAudio = false;
+      frame.removeAttribute("src");
     } else {
-      try { await startAudio(); wantsAudio = true; }
+      try {
+        if (!frame.getAttribute("src")) { wantsAudio = true; frame.src = "/mic/"; }
+        else { await startAudio(); wantsAudio = true; }
+      }
       catch (error) { ui.toast(error.message || "請重新開啟監聽。"); }
     }
     listenButton();
   });
   frame.addEventListener("load", () => {
-    if (wantsAudio) startAudio().catch(() => { wantsAudio = false; listenButton(); ui.toast("音訊已重連，請再按一次開啟監聽。"); });
+    if (wantsAudio) startAudio().catch(() => {
+      wantsAudio = false; listenButton(); ui.toast("播放器已就緒，請再按一次開啟監聽。");
+      setTimeout(() => { if (!wantsAudio) frame.removeAttribute("src"); }, 30000);
+    });
   });
   window.addEventListener("camera-audio", event => {
     const state = event.detail;
     const selected = state.sources.find(s => s.name === state.selected_source);
     $("audioSummary").textContent = state.healthy ? ui.sourceLabel(selected) + (state.actual_muted ? " · 麥克風已靜音" : " · 已連線") : "音訊中斷，自動重連中";
-    if (state.healthy && audioSeen && (state.pid !== publisherPid || !wasHealthy)) frame.src = "/mic/?reconnect=" + Date.now();
+    if (wantsAudio && !document.hidden && state.healthy && audioSeen && (state.pid !== publisherPid || !wasHealthy)) frame.src = "/mic/?reconnect=" + Date.now();
     publisherPid = state.pid;
     wasHealthy = state.healthy;
     audioSeen = true;
   });
   async function checkPreview() {
-    if (healthBusy || paused || pageGone || document.hidden) return;
+    if (mode === "low" || healthBusy || paused || pageGone || document.hidden) return;
     healthBusy = true;
     try {
       const health = await ui.api("/camera/health", undefined, 5000);
@@ -218,7 +253,7 @@
   }
   const monitorTimer = setInterval(() => {
     if (document.hidden || pageGone) return;
-    if (!paused && !imageFailed && image.getAttribute("src") && image.naturalWidth) {
+    if (mode !== "low" && !paused && !imageFailed && image.getAttribute("src") && image.naturalWidth) {
       try {
         painter.drawImage(image, 12, 12, Math.min(450, image.naturalWidth - 12), 48, 0, 0, 160, 40);
         const bytes = painter.getImageData(0, 0, 160, 40).data;
@@ -238,10 +273,15 @@
   }, 3000);
   document.addEventListener("visibilitychange", () => {
     clearTimeout(levelTimer);
-    if (document.hidden) { clearTimeout(retryTimer); retryTimer = null; image.removeAttribute("src"); connected = false; }
+    if (document.hidden) {
+      pull?.stop(); clearTimeout(connectionTimer); clearTimeout(retryTimer); retryTimer = null;
+      image.removeAttribute("src"); connected = false;
+      wantsAudio = false; frame.removeAttribute("src"); listenButton();
+    }
     else { if (!paused) connect(); pollLevel(); }
   });
   window.addEventListener("pagehide", event => {
+    pull?.stop(); frame.removeAttribute("src"); wantsAudio = false;
     image.removeAttribute("src");
     pageGone = true;
     clearTimeout(levelTimer);

@@ -18,15 +18,25 @@
     download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',
     restore: '<path d="M4 4v6h6"/><path d="M4 10a8 8 0 1 1 0 6M12 8v5l3 2"/>',
     check: '<path d="m4 12 5 5L20 6"/>'
+    ,star: '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z"/>'
   };
   const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.image}</svg>`;
   const $ = id => document.getElementById(id);
   const page = document.body.dataset.page;
+  $('mediaDate')?.setAttribute('aria-label','日期');
+  document.querySelectorAll('.view-switch a').forEach(link => {
+    if (new URL(link.href).search === location.search) link.setAttribute('aria-current','page');
+  });
   $("appHeader").innerHTML = `<div class="header-inner"><a class="brand" href="/">${icon("camera")}<span>Camera Monitor</span></a><nav class="main-nav" aria-label="主要導覽"><a href="/" ${page === "live" ? 'aria-current="page"' : ""}>即時監看</a><a href="/snapshots.html" ${page === "snapshots" ? 'aria-current="page"' : ""}>快照</a><a href="/recordings.html" ${page === "recordings" ? 'aria-current="page"' : ""}>錄影</a></nav><button class="header-settings quiet" id="openSettings" type="button">${icon("settings")}<span>設定</span></button></div>`;
   document.querySelectorAll("[data-icon]").forEach(el => { el.innerHTML = icon(el.dataset.icon); });
 
-  async function api(url, payload, timeout = 12000) {
+  const readers = new Set();
+  async function api(url, payload, timeout = 12000, signal) {
     const controller = new AbortController();
+    const cancel = () => controller.abort();
+    if (signal?.aborted) controller.abort();
+    signal?.addEventListener("abort", cancel, {once:true});
+    if (payload === undefined) readers.add(controller);
     const timer = setTimeout(() => controller.abort(), timeout);
     try {
       const response = await fetch(url, {cache: "no-store", signal: controller.signal,
@@ -39,7 +49,7 @@
     } catch (error) {
       if (error.name === "AbortError") throw new Error("連線逾時，請稍後重試");
       throw error;
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); readers.delete(controller); signal?.removeEventListener("abort", cancel); }
   }
 
   function element(tag, className, text) {
@@ -88,8 +98,12 @@
     if (!action) toastTimer = setTimeout(() => { toastNode.hidden = true; }, 7000);
   }
 
-  let preferences = {fit: "contain", reconnect: true};
+  let preferences = {fit: "contain", reconnect: true, bandwidth: "auto"};
   try { preferences = {...preferences, ...JSON.parse(localStorage.getItem("camera.preferences") || "{}")}; } catch (_) {}
+  function refreshPreferences() {
+    try { preferences={...preferences,...JSON.parse(localStorage.getItem('camera.preferences')||'{}')}; } catch (_) {}
+    window.dispatchEvent(new CustomEvent('camera-preferences',{detail:preferences}));
+  }
   let lastAudio = null;
   let lastRecorder = null;
   let settingsAudioBaseline = null;
@@ -114,6 +128,7 @@
   $("settingsForm").querySelector(".dialog-footer").prepend($("settingsError"));
   $("settingsError").setAttribute("role", "alert");
   backdrop(settings);
+  $("settingFit").closest("section").insertAdjacentHTML("beforeend", '<div class="setting-row"><label for="settingBandwidth">預覽頻寬</label><select id="settingBandwidth"><option value="auto">自動（手機省流量）</option><option value="standard">標準</option><option value="low">低頻寬</option></select></div><p class="settings-status">低頻寬使用 640px、約每秒 2 張影格；錄影畫質不變。</p>');
   $("settingReserve").step = "1";
   settings.addEventListener("close", () => { settingsGeneration++; });
   function sourceLabel(source) {
@@ -199,6 +214,7 @@
   $("openSettings").addEventListener("click", () => {
     $("settingFit").value = preferences.fit;
     $("settingReconnect").checked = preferences.reconnect;
+    $("settingBandwidth").value = preferences.bandwidth;
     settings.showModal();
     loadSettings();
   });
@@ -251,7 +267,7 @@
         try { await api("/backups-api/policy", {max_backup_gb: backupQuota}); settingsBackupBaseline = backupQuota; showSettingsError("", "saveBackup"); }
         catch (error) { showSettingsError("備份：" + error.message, "saveBackup"); }
       } else if (settingsBackupBaseline !== null) showSettingsError("", "saveBackup");
-      preferences = {fit: $("settingFit").value, reconnect: $("settingReconnect").checked};
+      preferences = {fit: $("settingFit").value, reconnect: $("settingReconnect").checked, bandwidth: $("settingBandwidth").value};
       try { localStorage.setItem("camera.preferences", JSON.stringify(preferences)); } catch (_) {}
       window.dispatchEvent(new CustomEvent("camera-preferences", {detail: preferences}));
       if (settingsErrors.size) { poll(); return; }
@@ -263,7 +279,7 @@
   });
 
   async function poll() {
-    if (polling || document.hidden) return;
+    if (polling || document.hidden || (page !== "live" && !settings.open)) return;
     polling = true;
     try {
       const results = await Promise.allSettled([api("/audio-api/status", undefined, 7000), api("/recordings-api/status", undefined, 8000)]);
@@ -280,15 +296,20 @@
       } else window.dispatchEvent(new Event("camera-recorder-unavailable"));
     } finally { polling = false; }
   }
+  const timeFormat = new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Taipei',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
+  const dateFormat = new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
+  const dayFormat = new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Taipei',year:'numeric',month:'long',day:'numeric',weekday:'short'});
   window.CameraUI = {api, icon, element, button, backdrop, toast, sourceLabel, preferences: () => preferences, poll,
     setRecorder: state => { lastRecorder = state; window.dispatchEvent(new CustomEvent("camera-recorder", {detail: state})); },
     audio: () => lastAudio, recorder: () => lastRecorder,
-    time: value => new Intl.DateTimeFormat("zh-TW", {timeZone: "Asia/Taipei", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false}).format(new Date(value)),
-    day: value => new Intl.DateTimeFormat("zh-TW", {timeZone: "Asia/Taipei", year: "numeric", month: "long", day: "numeric", weekday: "short"}).format(new Date(value + "T12:00:00+08:00")),
+    time: value => timeFormat.format(new Date(value)),
+    dateTime: value => dateFormat.format(new Date(typeof value === 'number' ? value * 1000 : value)),
+    day: value => dayFormat.format(new Date(value + 'T12:00:00+08:00')),
     size: value => value >= 1073741824 ? (value / 1073741824).toFixed(1) + " GB" : value >= 1048576 ? (value / 1048576).toFixed(1) + " MB" : value >= 1024 ? (value / 1024).toFixed(1) + " KB" : value + " B"};
   poll();
   let pollingTimer = setInterval(poll, 5000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
-  window.addEventListener("pageshow", event => { if (event.persisted) { poll(); clearInterval(pollingTimer); pollingTimer = setInterval(poll, 5000); } });
-  window.addEventListener("pagehide", event => { if (!event.persisted) clearInterval(pollingTimer); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); else readers.forEach(c => c.abort()); });
+  window.addEventListener("pageshow", event => { if (event.persisted) { refreshPreferences();poll(); clearInterval(pollingTimer); pollingTimer = setInterval(poll, 5000); } });
+  window.addEventListener('storage',event=>{if(event.key==='camera.preferences')refreshPreferences();});
+  window.addEventListener("pagehide", event => { readers.forEach(c => c.abort()); if (!event.persisted) clearInterval(pollingTimer); });
 })();

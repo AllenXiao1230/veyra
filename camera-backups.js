@@ -3,7 +3,7 @@
   const ui = window.CameraUI;
   const $ = id => document.getElementById(id);
   const api = (path, body) => ui.api("/backups-api" + path, body, 30000);
-  const date = epoch => new Intl.DateTimeFormat("zh-TW", {timeZone: "Asia/Taipei", dateStyle: "medium", timeStyle: "short"}).format(new Date(epoch * 1000));
+  const date = epoch => ui.dateTime(epoch);
   const actions = {create: "建立備份", verify: "驗證備份", recover: "還原至隔離目錄", trash: "移到回收桶", restore: "復原備份"};
   const states = {queued: "等待中", running: "進行中", complete: "已完成", failed: "失敗", interrupted: "已中斷"};
   let rows = [], trash = [], trashMode = false, busy = false, updating = false, lastJob = null, timer;
@@ -12,19 +12,27 @@
   confirmation.setAttribute("aria-labelledby", "backupConfirmTitle");
   confirmation.innerHTML = '<div class="dialog-heading"><h2 id="backupConfirmTitle"></h2></div><p class="dialog-body" id="backupConfirmCopy"></p><div class="dialog-footer"><button id="backupCancel" type="button">取消</button><button id="backupConfirm" type="button">確認</button></div>';
   document.body.append(confirmation);
+  actions.purge = '永久刪除備份';
+  const purgeInput = ui.element('input');purgeInput.setAttribute('aria-label','輸入永久刪除以確認');purgeInput.placeholder='輸入「永久刪除」';
+  purgeInput.type='text';purgeInput.autocomplete='off';
+  $('backupConfirmCopy').after(purgeInput);
+  purgeInput.addEventListener('input',()=>{$('backupConfirm').disabled=pending?.action==='purge'&&purgeInput.value!=='永久刪除';});
   ui.backdrop(confirmation);
   $("backupCancel").addEventListener("click", () => confirmation.close());
   function confirm(action, item) {
     pending = {action, item};
+    purgeInput.hidden=action!=='purge';purgeInput.value='';$('backupConfirm').disabled=action==='purge';
     $("backupConfirmTitle").textContent = actions[action] + "？";
     $("backupConfirmCopy").textContent = action === "trash" ? `${date(item.created_at)} 的備份會移到回收桶，可稍後復原。` : `將建立約 ${ui.size(item.size)} 的隔離副本，並校驗檔案；不會覆寫正式資料或套用系統設定。`;
     $("backupConfirm").textContent = actions[action];
     $("backupConfirm").className = action === "trash" ? "danger" : "primary";
+    if(action==='purge'){$('backupConfirmCopy').textContent='永久刪除此回收桶備份，無法復原。正式資料及其他備份不受影響。';$('backupConfirm').className='danger';}
     confirmation.showModal();
     $("backupCancel").focus();
   }
   $("backupConfirm").addEventListener("click", async () => {
     if (!pending) return;
+    if(pending.action==='purge'&&purgeInput.value!=='永久刪除')return;
     const {action, item} = pending;
     pending = null;
     confirmation.close();
@@ -35,9 +43,9 @@
     busy = true;
     render();
     try {
-      const result = await api("/" + action, action === "restore" ? {token: item.token} : action === "create" ? {} : {name: item.name});
+      const result = await api("/" + action, action === 'purge' ? {token:item.token,confirmation:'永久刪除'} : action === "restore" ? {token: item.token} : action === "create" ? {} : {name: item.name});
       if (result.job) { lastJob = result.job; renderJob(lastJob); }
-      else ui.toast(action === "trash" ? "備份已移到回收桶，可在回收桶復原。" : "備份已復原");
+      else ui.toast(action==='purge'?'備份已永久刪除':action === "trash" ? "備份已移到回收桶，可在回收桶復原。" : "備份已復原");
       await load();
     } catch (error) { ui.toast(error.message); }
     finally { busy = false; render(); status(); }
@@ -46,7 +54,7 @@
     const button = ui.element("button", className, text);
     button.type = "button";
     button.disabled = busy || Boolean(lastJob && ["queued", "running"].includes(lastJob.state));
-    button.addEventListener("click", () => ["trash", "recover"].includes(action) ? confirm(action, item) : perform(action, item));
+    button.addEventListener("click", () => ["trash", "recover", 'purge'].includes(action) ? confirm(action, item) : perform(action, item));
     return button;
   }
   function render() {
@@ -79,7 +87,7 @@
       }
       copy.append(ui.element("p", "muted", labels.join(" · ")));
       const controls = ui.element("div", "backup-actions");
-      if (trashMode) controls.append(makeButton("復原", "restore", item));
+      if (trashMode) controls.append(makeButton("復原", "restore", item),makeButton('永久刪除','purge',item,'danger quiet'));
       else {
         if (item.complete) controls.append(makeButton("驗證", "verify", item), makeButton("隔離還原", "recover", item));
         const remove = makeButton("移到回收桶", "trash", item, "quiet");

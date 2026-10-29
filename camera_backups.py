@@ -218,6 +218,9 @@ class BackupStore:
             try:
                 folder, data = self._receipt(folder.name)
                 original, saved = self.root / data["name"], folder / "data"
+                if data.get('state') == 'purging':
+                    self.purge(folder.name, '永久刪除')
+                    continue
                 if original.is_dir() and not original.is_symlink() and not saved.exists():
                     stat = original.stat()
                     if data.get("identity") == [stat.st_dev, stat.st_ino]:
@@ -267,6 +270,25 @@ class BackupStore:
         sync_directory(self.root)
         self._clear(folder)
         return {"ok": True, "name": data["name"]}
+
+    def purge(self, token, confirmation):
+        if confirmation != '永久刪除':
+            raise ValueError('請輸入「永久刪除」確認無法復原的操作')
+        folder, data = self._receipt(token)
+        saved = folder / 'data'
+        if data['name'] == self.latest_name() or saved.is_symlink() or saved.resolve().parent != folder.resolve():
+            raise ValueError('無法刪除受保護的備份或不正確路徑')
+        if saved.exists():
+            stat = saved.stat()
+            if data.get('identity') != [stat.st_dev, stat.st_ino]:
+                raise ValueError('回收桶備份身分不符，已保留')
+        data['state'] = 'purging'
+        atomic_json(folder / 'receipt.json', data)
+        if saved.is_dir():
+            # Exact validated trash/token/data; rmtree does not follow links.
+            shutil.rmtree(saved)
+        self._clear(folder)
+        return {'ok': True, 'token': token}
 
     def recover_isolated(self, name, progress=None):
         source = self.folder(name)

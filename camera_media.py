@@ -51,7 +51,7 @@ def media_error(handler, error):
     handler.send_json(code, {"error": str(error) if code != 503 else "媒體操作暫時失敗，請稍後重試"})
 
 
-def send_file(handler, path, cache="no-store"):
+def send_file(handler, path, cache="no-store", attachment=None):
     # Open before sending headers, so a concurrent trash operation cannot truncate the response.
     with pathlib.Path(path).open("rb") as stream:
         handler.send_response(200)
@@ -59,6 +59,8 @@ def send_file(handler, path, cache="no-store"):
         handler.send_header("Content-Length", str(os.fstat(stream.fileno()).st_size))
         handler.send_header("Cache-Control", cache)
         handler.send_header("X-Content-Type-Options", "nosniff")
+        if attachment:
+            handler.send_header("Content-Disposition", 'attachment; filename="' + attachment + '"')
         handler.end_headers()
         try:
             while chunk := stream.read(65536):
@@ -236,6 +238,12 @@ class MediaLibrary:
                     if original.is_symlink() or saved.is_symlink():
                         raise ValueError("symbolic link in recovery")
                     phase = data.get("state", "trashed")
+                    if phase == "purging":
+                        if saved.is_file():
+                            self._purge_file(folder, saved, data)
+                        else:
+                            self._finish_receipt(folder)
+                        continue
                     if original.is_file() and not saved.exists():
                         identity = data.get("identity")
                         stat = original.stat()
@@ -273,6 +281,22 @@ class MediaLibrary:
                 except (OSError, ValueError, KeyError):
                     continue
         return sorted(result, key=lambda r: r["deleted_at"], reverse=True)
+
+    def trash_page(self, query):
+        params = parse_qs(query)
+        limit = int(params.get('limit', ['24'])[0])
+        if not 1 <= limit <= 100:
+            raise ValueError('分頁範圍不正確')
+        rows = self.list_trash()
+        cursor = params.get('before', [''])[0]
+        offset = 0
+        if cursor:
+            positions = [i for i, r in enumerate(rows) if r['token'] == cursor]
+            if not positions:
+                raise ValueError('回收桶已更新，請重新整理')
+            offset = positions[0] + 1
+        page = rows[offset:offset + limit]
+        return {'items': page, 'total': len(rows), 'next_before': page[-1]['token'] if page and offset + limit < len(rows) else None}
 
     def move_to_trash(self, name):
         with self.lock, media_guard(self.root):
@@ -353,6 +377,46 @@ class MediaLibrary:
             self._finish_receipt(folder)
             return {"ok": True, "filename": receipt["filename"], "message": "已復原"}
 
+    def _purge_file(self, folder, source, receipt):
+        stat = source.stat()
+        if receipt.get('identity') != [stat.st_dev, stat.st_ino] or stat.st_size != receipt['size']:
+            raise MediaConflict('無法確認回收桶檔案身分，已保留')
+        key = hashlib.sha256(f"{receipt['filename']}:{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()
+        (self.root / '.thumbnails' / (key + '.jpg')).unlink(missing_ok=True)
+        if self.kind == 'recording':
+            from camera_playback import CACHE
+            identity = (str(self.root / receipt['filename']), stat.st_mtime_ns, stat.st_size)
+            key = hashlib.sha256(repr(identity).encode()).hexdigest()
+            (CACHE / (key + '.mp4')).unlink(missing_ok=True)
+        source.unlink()
+        sync_directory(folder)
+        self._finish_receipt(folder)
+
+    def purge(self, token, confirmation):
+        if confirmation != '永久刪除':
+            raise ValueError('請輸入「永久刪除」確認無法復原的操作')
+        with self.lock, media_guard(self.root):
+            folder, source, receipt = self.receipt(token)
+            receipt['state'] = 'purging'
+            atomic_json(folder / 'manifest.json', receipt)
+            self._purge_file(folder, source, receipt)
+        return {'ok': True, 'token': token}
+
+    def batch(self, payload):
+        action, items = payload.get('action'), payload.get('items')
+        if action not in ('trash', 'restore', 'purge') or not isinstance(items, list) or not 1 <= len(items) <= 100 or any(not isinstance(i, str) for i in items):
+            raise ValueError('每次請選取 1–100 個有效項目')
+        if action == 'purge' and payload.get('confirmation') != '永久刪除':
+            raise ValueError('永久刪除尚未確認')
+        results = []
+        for item in dict.fromkeys(items):
+            try:
+                result = self.move_to_trash(item) if action == 'trash' else self.restore(item) if action == 'restore' else self.purge(item, payload['confirmation'])
+                results.append({'item': item, 'ok': True, 'result': result})
+            except (OSError, ValueError, MediaConflict, sqlite3.Error) as error:
+                results.append({'item': item, 'ok': False, 'error': str(error)})
+        return {'results': results, 'succeeded': sum(r['ok'] for r in results), 'failed': sum(not r['ok'] for r in results)}
+
     def thumbnail(self, name):
         with self.lock:
             path = self.file(name)
@@ -368,12 +432,13 @@ class MediaLibrary:
         def generate():
             if target.is_file():
                 return target
-            result = subprocess.run(["/usr/bin/ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
-                                     "-ss", "0.2", "-i", str(path), "-frames:v", "1", "-vf", "scale=480:-2",
+            seek = [] if self.kind == 'snapshot' else ['-ss', '0.2']
+            result = subprocess.run(["/usr/bin/ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", '-threads','1','-filter_threads','1',
+                                     *seek, "-i", str(path), "-frames:v", "1", "-vf", "scale=480:-2",
                                      "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"],
                                     capture_output=True, timeout=12)
             if result.returncode or not result.stdout.startswith(b"\xff\xd8"):
-                raise ValueError("這段影片無法產生縮圖，原檔仍可下載")
+                raise ValueError("無法產生縮圖，原檔仍可下載")
             temporary = cache / (digest + "." + uuid.uuid4().hex + ".tmp")
             temporary.write_bytes(result.stdout)
             os.replace(temporary, target)

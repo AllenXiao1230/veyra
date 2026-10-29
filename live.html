@@ -3,9 +3,10 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#101216"><title>即時監看 · Camera Monitor</title>
-  <link rel="stylesheet" href="/camera-ui.css?v=hybrid1">
-  <script src="/camera-ui.js?v=hybrid1" defer></script>
-  <script src="/camera-live.js?v=stability1" defer></script>
+  <link rel="stylesheet" href="/camera-ui.css?v=mobile1">
+  <script src="/camera-ui.js?v=mobile1" defer></script>
+  <script src="/camera-mobile.js?v=mobile1" defer></script>
+  <script src="/camera-live.js?v=mobile1" defer></script>
 </head>
 <body data-page="live">
   <header class="app-header" id="appHeader"></header>
@@ -16,7 +17,7 @@
     </div>
     <section aria-label="攝影機即時影像">
       <div class="viewer" id="liveViewer">
-        <img id="liveImage" src="/camera/preview" alt="即時攝影機影像">
+        <img id="liveImage" alt="即時攝影機影像" decoding="async">
         <p class="viewer-message" id="viewerMessage">正在連接攝影機…</p>
         <div class="viewer-tools">
           <button class="icon-button" id="previewPause" type="button" aria-label="暫停預覽" title="暫停預覽" data-icon="pause"></button>
@@ -39,7 +40,7 @@
       </div>
       <button id="listenToggle" type="button"><span data-icon="volume"></span><span>開啟監聽</span></button>
     </section>
-    <iframe class="audio-frame" id="micFrame" src="/mic/" title="音訊播放器" allow="autoplay" tabindex="-1" aria-hidden="true"></iframe>
+    <iframe class="audio-frame" id="micFrame" title="音訊播放器" allow="autoplay" tabindex="-1" aria-hidden="true"></iframe>
   </main>
 </body>
 </html>

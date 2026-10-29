@@ -93,6 +93,16 @@ class MaintenanceTests(unittest.TestCase):
             m.health(repair=True)
             self.assertEqual(restart.call_count, 1)
 
+    def test_backup_preserves_favorites_as_a_consistent_database(self):
+        m.STATE.mkdir(parents=True,exist_ok=True)
+        with sqlite3.connect(m.STATE/'event-preferences.sqlite3') as db:
+            db.execute('CREATE TABLE favorites(event_id INTEGER PRIMARY KEY,favorite INTEGER)')
+            db.execute('INSERT INTO favorites VALUES(1,1)')
+        with patch.object(m,'http_json',return_value={'recording':False}):
+            target=Path(m.backup()['path'])/'maintenance-state/event-preferences.sqlite3'
+        with sqlite3.connect(target) as db:
+            self.assertEqual(db.execute('SELECT * FROM favorites').fetchall(),[(1,1)])
+
     def test_backup_incremental_links_never_link_live_files(self):
         with patch.object(m, "http_json", return_value={"recording":False}):
             first = Path(m.backup()["path"])

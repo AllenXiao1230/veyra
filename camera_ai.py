@@ -133,6 +133,10 @@ class EventStore:
                 """
             )
             db.execute("CREATE INDEX IF NOT EXISTS events_created_at ON events(created_at DESC)")
+        # Keep WAL/shm available to readers in a read-only service mount.
+        # This connection holds no transaction and is never used by workers.
+        self._wal_keeper = self.connect()
+        self._wal_keeper.execute('SELECT id FROM events LIMIT 1').fetchall()
 
     def connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.db_path, timeout=10)
@@ -519,10 +523,12 @@ class ApiHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         # Scheme B: reject cached legacy clients before reading or storing a body.
         path = urlparse(self.path).path
-        if path in {"/trash", "/restore"}:
+        if path in {"/trash", "/restore", "/purge", "/batch"}:
             try:
                 data = read_body(self)
-                result = (self.service.media.move_to_trash(data.get("filename")) if path == "/trash" else
+                result = (self.service.media.batch(data) if path == '/batch' else
+                          self.service.media.purge(data.get('token'), data.get('confirmation')) if path == '/purge' else
+                          self.service.media.move_to_trash(data.get("filename")) if path == "/trash" else
                           self.service.media.restore(data.get("token")))
                 self.send_json(200, result)
             except Exception as exc:
@@ -535,12 +541,14 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
-        if parsed.path in {"/library", "/trash"} or parsed.path.startswith("/snapshots/"):
+        if parsed.path in {"/library", "/trash"} or parsed.path.startswith(("/snapshots/", "/thumbnail/")):
             try:
                 if parsed.path == "/library":
                     self.send_json(200, self.service.media.list(parsed.query))
                 elif parsed.path == "/trash":
-                    self.send_json(200, {"items": self.service.media.list_trash()})
+                    self.send_json(200, self.service.media.trash_page(parsed.query) if parsed.query else {"items": self.service.media.list_trash()})
+                elif parsed.path.startswith('/thumbnail/'):
+                    send_file(self, self.service.media.thumbnail(unquote(parsed.path[len('/thumbnail/'):])),'private, max-age=60')
                 else:
                     send_file(self, self.service.media.file(unquote(parsed.path[len("/snapshots/"):])))
             except Exception as exc:
@@ -606,6 +614,7 @@ def main() -> int:
         service.stop_requested.set()
         worker.join(timeout=8)
         server.server_close()
+        service.store._wal_keeper.close()
     return 0
 
 

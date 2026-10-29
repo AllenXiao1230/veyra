@@ -23,6 +23,9 @@ stop_requested = threading.Event()
 latest_frame = None
 preview_frame = None
 preview_frame_id = 0
+low_frame = None
+low_frame_id = 0
+low_frame_tick = 0.0
 frame_id = 0
 last_frame_tick = 0.0
 last_frame_at = None
@@ -44,6 +47,7 @@ def health():
 def capture():
     global latest_frame, frame_id, last_frame_tick, last_frame_at, last_error
     global preview_frame, preview_frame_id
+    global low_frame, low_frame_id, low_frame_tick
     preview_tick = 0.0
     while not stop_requested.is_set():
         cap = None
@@ -74,12 +78,23 @@ def capture():
                     if success:
                         small_jpeg = encoded.tobytes()
                         preview_tick = time.monotonic()
+                low_jpeg = None
+                if time.monotonic() - low_frame_tick >= 0.5:
+                    height, width = frame.shape[:2]
+                    low = cv2.resize(frame, (640, round(height * 640 / width)), interpolation=cv2.INTER_AREA) if width > 640 else frame
+                    success, encoded = cv2.imencode('.jpg', low, [cv2.IMWRITE_JPEG_QUALITY, 55])
+                    if success:
+                        low_jpeg = encoded.tobytes()
                 with lock:
                     latest_frame = jpeg.tobytes()
                     frame_id += 1
                     if small_jpeg is not None:
                         preview_frame = small_jpeg
                         preview_frame_id += 1
+                    if low_jpeg is not None:
+                        low_frame = low_jpeg
+                        low_frame_id += 1
+                        low_frame_tick = time.monotonic()
                     last_frame_tick = time.monotonic()
                     last_frame_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
                     last_error = None
@@ -90,6 +105,7 @@ def capture():
             with lock:
                 latest_frame = None
                 preview_frame = None
+                low_frame = None
                 last_error = str(exc)
                 lock.notify_all()
             stop_requested.wait(2)
@@ -101,6 +117,28 @@ def capture():
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlsplit(self.path).path
+        if path == '/frame.jpg':
+            with lock:
+                frame, identity = low_frame, low_frame_id
+                ready = health()['healthy'] and frame is not None and time.monotonic() - low_frame_tick < 3
+            if not ready:
+                self.send_error(503, 'Camera is reconnecting')
+                return
+            etag = '"low-' + str(identity) + '"'
+            unchanged = self.headers.get('If-None-Match') == etag
+            self.send_response(304 if unchanged else 200)
+            self.send_header('Content-Type', 'image/jpeg')
+            if not unchanged:
+                self.send_header('Content-Length', str(len(frame)))
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('ETag', etag)
+            self.end_headers()
+            if not unchanged:
+                try:
+                    self.wfile.write(frame)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+            return
         if path == "/health":
             state = health()
             body = json.dumps(state).encode()

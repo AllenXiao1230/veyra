@@ -125,6 +125,25 @@ class MotionStabilityTests(unittest.TestCase):
 
 
 class StreamGapTests(unittest.TestCase):
+    def test_low_bandwidth_jpeg_etag_and_stale_frame(self):
+        import http.client
+        with patch.multiple(stamp, lock=threading.Condition(),stop_requested=threading.Event(),
+                latest_frame=b'full',low_frame=b'jpeg fixture',low_frame_id=8,
+                low_frame_tick=time.monotonic(),last_frame_tick=time.monotonic(),worker=MagicMock()):
+            server=stamp.ThreadingHTTPServer(('127.0.0.1',0),stamp.Handler)
+            threading.Thread(target=server.serve_forever,daemon=True).start()
+            try:
+                for requested,expected in ((None,200),('"low-8"',304)):
+                    conn=http.client.HTTPConnection('127.0.0.1',server.server_port,timeout=3)
+                    conn.request('GET','/frame.jpg',headers={'If-None-Match':requested} if requested else {})
+                    response=conn.getresponse();body=response.read()
+                    self.assertEqual(response.status,expected)
+                    self.assertEqual(body,b'jpeg fixture' if expected==200 else b'');conn.close()
+                stamp.low_frame_tick-=5
+                conn=http.client.HTTPConnection('127.0.0.1',server.server_port,timeout=3);conn.request('GET','/frame.jpg')
+                response=conn.getresponse();self.assertEqual(response.status,503);response.read();conn.close()
+            finally:server.shutdown();server.server_close()
+
     def test_two_second_source_gap_keeps_preview_and_recording_stream_open(self):
         for route in ('/stream', '/preview'):
             with self.subTest(route=route), patch.multiple(stamp, lock=threading.Condition(),

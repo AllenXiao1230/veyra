@@ -27,6 +27,15 @@ preview = load("candidate_preview", "timestamp_v2.py")
 
 
 class FixTests(unittest.TestCase):
+    def test_event_database_keeps_wal_files_for_readonly_consumers(self):
+        import gc
+        with tempfile.TemporaryDirectory() as directory:
+            store = ai.EventStore(pathlib.Path(directory))
+            gc.collect()
+            self.assertTrue(pathlib.Path(str(store.db_path) + '-shm').exists())
+            self.assertFalse(store._wal_keeper.in_transaction)
+            store._wal_keeper.close()
+
     def test_ai_supervisor_recovers_after_worker_exception(self):
         with tempfile.TemporaryDirectory() as folder:
             settings = dataclasses.replace(ai.Settings.from_file(pathlib.Path(folder) / "missing.env"),

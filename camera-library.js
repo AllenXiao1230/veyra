@@ -1,5 +1,6 @@
 "use strict";
 (() => {
+  if (document.body.dataset.page === 'snapshots' && new URLSearchParams(location.search).get('view') === 'events') return;
   const ui = window.CameraUI;
   const $ = id => document.getElementById(id);
   const isRecording = document.body.dataset.page === "recordings";
@@ -18,6 +19,22 @@
   let loading = false;
   let generation = 0;
   let opened = null;
+  let cursors = [], cursor = null, request, resumeList = false;
+  const previousPage = ui.element('button', '', '上一頁');
+  previousPage.type = 'button'; previousPage.hidden = true;
+  $('loadMore').before(previousPage);
+  previousPage.addEventListener('click', () => load(false, true));
+  const restoreSelected = ui.element('button', '', '復原選取');
+  restoreSelected.type = 'button'; restoreSelected.hidden = true;
+  $('deleteSelected').before(restoreSelected);
+  restoreSelected.addEventListener('click', async () => {
+    restoreSelected.disabled = true;
+    try {
+      const result = await ui.api(base + '/batch', {action:'restore',items:[...selected]},60000);
+      ui.toast(`已復原 ${result.succeeded} 個${result.failed ? `；${result.failed} 個未完成` : ''}`);
+      selectionMode = false; await load(true);
+    } catch(error) {ui.toast(error.message);} finally {restoreSelected.disabled = false;}
+  });
 
   const preview = ui.element("dialog", "preview-dialog");
   preview.setAttribute("aria-labelledby", "previewTitle");
@@ -25,11 +42,16 @@
   document.body.append(preview);
   ui.backdrop(preview);
   $("closePreview").addEventListener("click", () => preview.close());
-  preview.addEventListener("close", () => { $("previewContent").replaceChildren(); opened = null; });
+  function releasePreview() {
+    const video = $('previewContent').querySelector('video');
+    if (video) { video.pause(); video.removeAttribute('src'); video.load(); }
+    $('previewContent').replaceChildren(); opened = null;
+  }
+  preview.addEventListener("close", releasePreview);
 
   function openMedia(item) {
     if (selectionMode) { toggleSelection(item); return; }
-    opened = item;
+    releasePreview(); opened = item;
     $("previewTitle").textContent = ui.day(item.date) + " " + ui.time(item.created_at);
     $("previewDownload").href = item.url;
     $("previewDownload").download = item.filename;
@@ -56,33 +78,47 @@
   ui.backdrop(confirmation);
   let pendingDelete = [];
   let deleting = false;
+  let permanent = false;
+  const purgeInput = ui.element('input');
+  purgeInput.type='text';
+  const deleteError = ui.element('p','dialog-error'); deleteError.setAttribute('role','alert');deleteError.hidden=true;
+  purgeInput.placeholder = '輸入「永久刪除」'; purgeInput.setAttribute('aria-label', '輸入永久刪除以確認');
+  purgeInput.autocomplete = 'off';
+  $('deleteDescription').after(purgeInput);
+  purgeInput.after(deleteError);
+  purgeInput.addEventListener('input', () => { $('confirmDelete').disabled = permanent && purgeInput.value !== '永久刪除'; });
   confirmation.addEventListener("cancel", event => { if (deleting) event.preventDefault(); });
   $("cancelDelete").addEventListener("click", () => confirmation.close());
   function confirmDelete(entries) {
     pendingDelete = entries.filter(i => !i.active);
     if (!pendingDelete.length) return;
-    $("deleteDescription").textContent = `將 ${pendingDelete.length} ${unit}${noun}移到回收桶，之後可以復原。`;
+    permanent = trashMode;
+    deleteError.hidden=true;deleteError.textContent='';
+    $('deleteTitle').textContent = permanent ? '永久刪除？' : '移到回收桶？';
+    purgeInput.hidden = !permanent; purgeInput.value = '';
+    $('confirmDelete').disabled = permanent;
+    $('confirmDelete').textContent = permanent ? '永久刪除' : '移到回收桶';
+    $("deleteDescription").textContent = permanent ? `永久刪除 ${pendingDelete.length} ${unit}${noun}，無法復原。備份與先前匯出副本不受影響。` : `將 ${pendingDelete.length} ${unit}${noun}移到回收桶，之後可以復原。`;
     confirmation.showModal();
     $("cancelDelete").focus();
   }
   $("confirmDelete").addEventListener("click", async () => {
-    if (deleting) return;
+    if (deleting || (permanent && purgeInput.value !== '永久刪除')) return;
     deleting = true;
     const receipts = [];
     const failed = [];
     $("confirmDelete").disabled = true;
     $("cancelDelete").disabled = true;
     try {
-      for (const item of pendingDelete) {
-        $("confirmDelete").textContent = `處理中 ${receipts.length + failed.length + 1} / ${pendingDelete.length}`;
-        try { receipts.push(await ui.api(base + "/trash", {filename: item.filename})); }
-        catch (error) { failed.push(error.message); }
-      }
+      const result = await ui.api(base + '/batch', {action: permanent ? 'purge' : 'trash',
+        items: pendingDelete.map(i => permanent ? i.token : i.filename), confirmation: permanent ? purgeInput.value : undefined}, 60000);
+      for (const row of result.results) { if (row.ok) receipts.push(row.result); else failed.push(row.error); }
       confirmation.close();
       selected.clear();
       selectionMode = false;
       await load(true);
-      if (receipts.length) {
+      if (permanent) { ui.toast(`已永久刪除 ${receipts.length} ${unit}${noun}${failed.length ? `；${failed.length} 個未完成` : ''}`); }
+      else if (receipts.length) {
         let remaining = [...receipts];
         const undo = async () => {
           const failedReceipts = [];
@@ -97,10 +133,10 @@
         };
         ui.toast(`已移到回收桶：${receipts.length} ${unit}${noun}${failed.length ? `；${failed.length} 個未完成，可重新選取重試` : ""}`, undo);
       } else if (failed.length) ui.toast(failed[0]);
-    } finally {
+    } catch (error) { deleteError.hidden=false;deleteError.textContent=error.message+' 若回應逾時，請關閉後重新整理確認結果。'; } finally {
       deleting = false;
-      $("confirmDelete").textContent = "移到回收桶";
-      $("confirmDelete").disabled = false;
+      $("confirmDelete").textContent = permanent ? '永久刪除' : "移到回收桶";
+      $("confirmDelete").disabled = permanent && purgeInput.value !== '永久刪除';
       $("cancelDelete").disabled = false;
     }
   });
@@ -108,9 +144,12 @@
 
   function updateSelection() {
     $("selectionBar").hidden = !selectionMode;
-    $("selectToggle").textContent = selectionMode ? "取消選取" : "選取";
+    $("selectToggle").textContent = selectionMode ? "取消選取" : "批量管理";
     $("selectionCount").textContent = `已選取 ${selected.size} ${unit}`;
     $("deleteSelected").disabled = !selected.size;
+    $('deleteSelected').textContent = trashMode ? '永久刪除' : '移到回收桶';
+    restoreSelected.hidden = !trashMode;
+    restoreSelected.disabled = !selected.size;
     content.classList.toggle("select-mode", selectionMode);
     content.querySelectorAll(".media-item").forEach(card => {
       const checked = selected.has(card.dataset.name);
@@ -121,8 +160,9 @@
   }
   function toggleSelection(item) {
     if (item.active) return;
-    if (selected.has(item.filename)) selected.delete(item.filename);
-    else selected.add(item.filename);
+    const key = item.token || item.filename;
+    if (selected.has(key)) selected.delete(key);
+    else selected.add(key);
     updateSelection();
   }
   function duration(seconds) {
@@ -148,7 +188,7 @@
     const damaged = isRecording && !["ok", "recording"].includes(item.health);
     if (!item.active && !damaged) {
       const image = document.createElement("img");
-      image.src = item.thumbnail_url;
+      image.src = isRecording ? item.thumbnail_url : '/ai-api/thumbnail/' + encodeURIComponent(item.filename);
       image.alt = noun + " " + ui.time(item.created_at);
       image.loading = "lazy";
       image.decoding = "async";
@@ -214,7 +254,7 @@
     $("libraryCount").textContent = `${total.toLocaleString()} ${unit}`;
     $("trashToggle").innerHTML = ui.icon(trashMode ? "restore" : "trash") + `<span>${trashMode ? "返回" + noun : "回收桶" + (trashCount ? ` (${trashCount})` : "")}</span>`;
     $("mediaDate").disabled = trashMode;
-    $("selectToggle").hidden = trashMode || !items.length;
+    $("selectToggle").hidden = !items.length;
     const date = $("mediaDate").value;
     const options = [ui.element("option", "", "全部日期"), ...dates.map(day => {
       const option = ui.element("option", "", day.date.replaceAll("-", "/") + ` · ${day.count} ${unit}`);
@@ -241,10 +281,15 @@
       content.append(empty);
     } else if (trashMode) {
       for (const item of items) {
-        const row = ui.element("article", "trash-row");
+        const row = ui.element("article", "trash-row media-item");
+        row.dataset.name = item.token;
         row.innerHTML = ui.icon(isRecording ? "video" : "image");
+        const choice = ui.element('label', 'media-selection');
+        const box = document.createElement('input'); box.type = 'checkbox';
+        box.setAttribute('aria-label', '選取 ' + item.filename);
+        box.addEventListener('change', () => toggleSelection(item)); choice.append(box); row.append(choice);
         const copy = ui.element("div", "trash-copy");
-        copy.append(ui.element("strong", "", item.filename), ui.element("p", "", `刪除於 ${new Intl.DateTimeFormat("zh-TW", {timeZone:"Asia/Taipei",dateStyle:"short",timeStyle:"short"}).format(new Date(item.deleted_at))} · ${ui.size(item.size)}`));
+        copy.append(ui.element("strong", "", item.filename), ui.element("p", "", `刪除於 ${ui.dateTime(item.deleted_at)} · ${ui.size(item.size)}`));
         const restore = ui.element("button", "", "復原");
         restore.type = "button";
         restore.addEventListener("click", async () => {
@@ -252,39 +297,47 @@
           try { await ui.api(base + "/restore", {token: item.token}); ui.toast("已復原"); await load(true); }
           catch (error) { restore.disabled = false; ui.toast(error.message); }
         });
-        row.append(copy, restore);
+        const purge = ui.element('button', 'danger quiet', '永久刪除'); purge.type = 'button';
+        purge.addEventListener('click', () => confirmDelete([item]));
+        const controls = ui.element('div', 'trash-actions'); controls.append(restore, purge);
+        row.append(copy, controls);
         content.append(row);
       }
     } else {
       appendGroups(items);
     }
     }
-    $("loadedCount").textContent = trashMode ? "" : `已載入 ${items.length.toLocaleString()} / ${total.toLocaleString()} ${unit}`;
-    $("loadMore").hidden = trashMode || !next;
+    $("loadedCount").textContent = `本頁 ${items.length.toLocaleString()} / 共 ${total.toLocaleString()} ${unit}`;
+    $("loadMore").hidden = !next; $('loadMore').textContent = '下一頁';
+    previousPage.hidden = !cursors.length;
     updateSelection();
   }
-  async function load(reset = false) {
-    if (loading && !reset) return;
-    const currentGeneration = reset ? ++generation : generation;
+  async function load(reset = false, previous = false, retry = false) {
+    if (loading && !reset && !retry) return;
+    request?.abort(); request = new AbortController();
+    const currentGeneration = ++generation;
     loading = true;
     content.setAttribute("aria-busy", "true");
     $("loadMore").disabled = true;
-    if (reset) { next = null; selected.clear(); }
+    if (reset) { next = null; cursors = []; cursor = null; }
+    else if(!retry && previous) cursor = cursors.pop();
+    else if(!retry) { cursors.push(cursor); cursor = next; }
+    selected.clear(); selectionMode = false;
     let additions = null;
     try {
       if (trashMode) {
-        const result = await ui.api(base + "/trash");
-        if (currentGeneration !== generation) return;
+        const params = new URLSearchParams({limit:'24'}); if(cursor) params.set('before',cursor);
+        const result = await ui.api(base + '/trash?' + params,undefined,30000,request.signal);
+        if (currentGeneration !== generation || document.hidden) return;
         items = result.items;
-        total = trashCount = items.length;
+        total = trashCount = result.total; next = result.next_before;
       } else {
-        const params = new URLSearchParams({limit: isRecording ? "24" : "48"});
+        const params = new URLSearchParams({limit: window.matchMedia('(max-width:600px)').matches ? '12' : '24'});
         if ($("mediaDate").value) params.set("date", $("mediaDate").value);
-        if (!reset && next) params.set("before", next);
-        const result = await ui.api(base + "/library?" + params, undefined, 30000);
-        if (currentGeneration !== generation) return;
-        additions = reset ? null : result.items.filter(i => !items.some(old => old.filename === i.filename));
-        items = reset ? result.items : [...items, ...additions];
+        if (cursor) params.set("before", cursor);
+        const result = await ui.api(base + "/library?" + params, undefined, 30000, request.signal);
+        if (currentGeneration !== generation || document.hidden) return;
+        items = result.items;
         dates = result.dates;
         total = result.filtered_total;
         trashCount = result.trash_count;
@@ -292,7 +345,9 @@
         next = result.next_before;
       }
       render(additions);
+      if(!reset&&!retry)content.scrollIntoView({block:'start',behavior:'auto'});
     } catch (error) {
+      if(currentGeneration !== generation || document.hidden) return;
       if (!items.length) {
         content.replaceChildren(ui.element("div", "empty-state", error.message));
         $("libraryCount").textContent = "載入失敗";
@@ -311,12 +366,24 @@
   $("loadMore").addEventListener("click", () => load(false));
   $("trashToggle").addEventListener("click", () => { trashMode = !trashMode; selectionMode = false; items = []; load(true); });
   $("selectToggle").addEventListener("click", () => { selectionMode = !selectionMode; selected.clear(); updateSelection(); });
-  $("selectLoaded").addEventListener("click", () => { items.filter(i => !i.active).forEach(i => selected.add(i.filename)); updateSelection(); });
-  $("deleteSelected").addEventListener("click", () => confirmDelete(items.filter(i => selected.has(i.filename))));
+  $('selectLoaded').textContent = '全選本頁';
+  $("selectLoaded").addEventListener("click", () => { items.filter(i => !i.active).forEach(i => selected.add(i.token || i.filename)); updateSelection(); });
+  $("deleteSelected").addEventListener("click", () => confirmDelete(items.filter(i => selected.has(i.token || i.filename))));
   preview.addEventListener("keydown", event => {
     if (!opened || isRecording || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
     const index = items.indexOf(opened) + (event.key === "ArrowRight" ? 1 : -1);
     if (items[index]) { event.preventDefault(); openMedia(items[index]); }
   });
   load(true);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      resumeList=loading;request?.abort(); if(preview.open) preview.close();
+      content.querySelectorAll('img').forEach(image=>{image.dataset.resumeSrc=image.getAttribute('src');image.removeAttribute('src');});
+    } else {
+      content.querySelectorAll('img[data-resume-src]').forEach(image=>{image.src=image.dataset.resumeSrc;delete image.dataset.resumeSrc;});
+      if(resumeList||!items.length) {resumeList=false;load(false,false,true);}
+    }
+  });
+  window.addEventListener('pagehide', () => { request?.abort(); if(preview.open) preview.close();releasePreview(); items = []; selected.clear(); content.replaceChildren(); });
+  window.addEventListener('pageshow', event => { if(event.persisted) load(true); });
 })();

@@ -1,10 +1,22 @@
 # Camera Monitor
 
-Ubuntu 攝影機監控專案的 `fix1`、`audio1`、`library1` 與 `meter1` 部署來源：背景移動偵測、事件快照、時間戳直播、
-動態錄影、健康監控與增量備份。網頁透過 nginx 和 Tailscale 提供私有存取。
+Ubuntu 攝影機監控專案的維護來源，包含 `hybrid1`、`stability1` 與 `mobile1` 擴充：背景移動偵測、事件快照、時間戳直播、
+動態錄影、事件時間軸、健康監控與本機增量備份。網頁透過 nginx 和 Tailscale 提供私有存取。
 
-這份 repository 對應已部署的維護版本，不是從零安裝套件；完整操作說明與驗收限制見
+這份 repository 是既有服務的維護來源，不是從零安裝套件；各版本的部署／驗收結果須以對應交付紀錄為準。完整操作說明與驗收限制見
 [README_camera_monitor.md](README_camera_monitor.md)。
+
+## 手機預覽、事件與回收桶（mobile1）
+
+右上角「設定」→「預覽頻寬」提供自動／標準／低頻寬。自動模式在手機、瀏覽器省流量或可辨識的弱網環境選擇低頻寬：最高 640px、約 2fps 的單張 JPEG；標準模式保留最高 960px、8fps MJPEG。錄影仍使用原解析度時間戳管線，預覽設定不改變影片畫質。頁面隱藏時取消前景 GET、回收影格 blob、卸載音訊 iframe 與開啟的播放器；返回後恢復預覽，監聽需重新點按。
+
+快照、錄影與事件清單每頁在 ≤600px 視窗取 12 項，其餘取 24 項，以「上一頁／下一頁」替換本頁內容，不累積無限 DOM。媒體回收桶目前每頁 24 項。日期與時間統一顯示 Asia/Taipei、24 小時制。
+
+在「快照」切換「事件時間軸」（`/snapshots.html?view=events`），可依日期、AI 標註有人／其他動作與收藏篩選，查看快照及已完成的相關錄影。收藏保存在伺服器，可單筆切換或選取本頁批量收藏／匯出。
+
+匯出預設 ZIP，包含事件 JSON／CSV 紀錄、現存快照與 SHA-256 清單；已完成的相關影片須另勾選。亦可只匯出 CSV 或 JSON。每次最多 100 事件、2GiB，伺服器產檔後直接下載，不在手機組裝 ZIP；下載資格 24 小時失效，匯出暫存共用 4GiB 預算。缺失的快照及未完成影片不納入封存，事件紀錄保留。
+
+快照、影片及備份先移到回收桶；只有在回收桶內輸入完整「永久刪除」後才能永久清除，無法復原。媒體支援批量移除／還原／永久刪除及部分成功回報；備份為逐筆操作。錄影中檔案及最近成功備份仍受保護。永久刪除不會連帶刪除先前備份或匯出副本。
 
 ## 程式與部署對照
 
@@ -17,14 +29,16 @@ Ubuntu 攝影機監控專案的 `fix1`、`audio1`、`library1` 與 `meter1` 部�
 | `camera_maintenance.py` | `/usr/local/sbin/camera-maintenance` |
 | `camera_audio.py` | `/opt/camera-common/camera_audio.py`，來源選擇、音訊 API 與發布 supervisor |
 | `camera_media.py` | `/opt/camera-common/camera_media.py`，完整媒體清單、日期分類、縮圖與回收桶 |
-| `camera-ui.css`、`camera-ui.js`、`camera-live.js`、`camera-library.js` | 三個頁面的共用介面、設定、監看與相簿互動 |
+| `camera_timeline.py` | `/opt/camera-common/camera_timeline.py`，事件分頁、收藏與伺服器匯出 |
+| `camera-ui.css`、`camera-ui.js`、`camera-live.js`、`camera-library.js` | 共用介面、設定、監看與媒體互動 |
+| `camera-mobile.js`、`camera-timeline.js`、`camera-backups.js` | 單張 JPEG 生命週期、事件時間軸與備份管理 |
 | `camera-audio.service` | 使用者 unit，`~/.config/systemd/user/camera-audio.service` |
 | `camera-audio-controls.js` | 網頁音訊控制；API 經 `/audio-api/` 代理至 loopback 8094 |
-| `live.html`、`snapshots.html`、`recordings.html` | `/var/www/camera-monitor/`；live.html 部署為 index.html，舊 motion.html 網址轉向快照 |
+| `live.html`、`snapshots.html`、`recordings.html`、`backups.html` | `/var/www/camera-monitor/`；live.html 部署為 index.html，舊 motion.html 網址轉向快照 |
 | `camera-*.service`、`camera-*.timer` | systemd 健康檢查、備份與保存期限排程 |
 | `nginx-camera-monitor` | loopback Web 入口與反向代理設定 |
 | `camera-monitor-fix1-manifest.json` | 24 個部署檔案的路徑與 SHA-256 |
-| `camera-monitor-meter1-manifest.json` | 目前完整部署檔案的路徑與 SHA-256；保留前版 manifest 供比較 |
+| `camera-monitor-*-manifest.json` | 各版部署檔案的路徑與 SHA-256；依本次交付紀錄選用對應版本 |
 
 檔案保持平面配置，便於核對部署內容與在隔離目錄執行既有測試。Repository 不包含
 錄影、快照、事件資料庫、密碼、SSH 連線工具或正式環境的憑證。
@@ -38,6 +52,7 @@ python3 test_camera_fixes.py
 python3 test_camera_audio.py
 python3 test_camera_media.py
 sudo python3 test_camera_maintenance.py
+python3 test_camera_events.py
 ```
 
 維護測試會在 temporary directory 建立測試資料。它在 Ubuntu 上以管理權限驗證
@@ -83,20 +98,22 @@ API：`GET /audio-api/status`、`GET /audio-api/health`；
 ## 媒體管理（library1）
 
 首頁只顯示即時影像、錄影控制及精簡的音訊監聽列；右上角「設定」統一管理影像顯示、自動重連、動態觸發錄影及音訊來源／音量／靜音／重啟。
-`/snapshots.html` 顯示全部實際快照，按台北日期分類並以游標分頁載入；舊 `/motion.html` 導向此頁。
+`/snapshots.html` 顯示全部實際快照，按台北日期分類並以游標上一頁／下一頁瀏覽；舊 `/motion.html` 導向此頁。
 `/recordings.html` 使用相同導覽、日期篩選及設定視窗，提供實際影片縮圖、回放、下載和刪除。
 
-刪除會將檔案搬到同磁碟的回收桶，保留原檔內容與復原記錄，不提供永久清除：
+一般移除會將檔案搬到同磁碟的回收桶，保留原檔內容與復原記錄；mobile1 新增回收桶內的確認式永久刪除：
 
 - 快照：`/var/lib/camera-ai/trash/`，移除時將關聯事件的圖片欄位清空，復原時恢復原關聯，事件本身保留。
 - 錄影：`/var/lib/camera-recorder/.trash/`，錄影進行中的檔案拒絕刪除。
 - 刪除通知可直接「復原」，或由各頁的「回收桶」復原；回收桶也納入每日備份。
 - 影片縮圖快取位於 `/var/lib/camera-recorder/.thumbnails/`，以檔名、大小及修改時間辨識版本，同時最多兩個編碼工作；損壞檔案仍保留下載與刪除功能。
 
-API 使用既有的 `/ai-api/` 及 `/recordings-api/`：`GET /library?limit=48&date=YYYY-MM-DD&before=...`、
-`GET /trash`、`POST /trash {"filename":"..."}`、`POST /restore {"token":"..."}`。
+API 使用既有的 `/ai-api/` 及 `/recordings-api/`：`GET /library?limit=12&date=YYYY-MM-DD&before=...`、
+`GET /trash?limit=24&before=...`、`POST /trash {"filename":"..."}`、`POST /restore {"token":"..."}`、`POST /purge {"token":"...","confirmation":"永久刪除"}`；批量操作使用 `/batch`，逐項回傳成功與失敗。
 快照原圖為 `/ai-api/snapshots/<filename>`；影片縮圖為 `/recordings-api/thumbnail/<filename>`。
 寫入驗證同源、JSON 格式及檔名，nginx 會轉送原始 Host。完整媒體清單包含沒有事件關聯的快照，沒有固定的歷史資料上限。
+
+事件使用 `/events-api/list`、`/events-api/favorite`、`/events-api/export` 與 `/events-api/exports/<id>`／`download`。收藏資料庫為 `/var/lib/camera-maintenance/event-preferences.sqlite3`；備份透過 SQLite 線上備份產生一致副本（包含 WAL 尚未 checkpoint 的提交），保存到封存的 `maintenance-state/`。
 
 介面設計依 `PRODUCT.md` 及 Impeccable 的表面 brief；截圖檢查檔位於 Git 排除的 `.impeccable/review/`，不將實際快照或錄影納入版本控制。
 

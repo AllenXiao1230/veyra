@@ -1,6 +1,7 @@
 #!/usr/bin/python3
-"""Loopback-only backup jobs. No live-data restore, purge, shell or arbitrary paths."""
+"""Loopback-only backup/event jobs and explicitly confirmed trash deletion."""
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -19,6 +20,8 @@ from camera_backups import BackupStore, verify_backup
 from camera_media import read_body
 from camera_state import atomic_json
 from camera_storage import backup_policy, save_backup_policy
+from camera_timeline import Timeline
+from camera_media import send_file
 
 
 class Jobs:
@@ -138,12 +141,32 @@ class Handler(BaseHTTPRequestHandler):
 
     def failure(self, error):
         status = 403 if isinstance(error, PermissionError) else 404 if isinstance(error, FileNotFoundError) else 400 if isinstance(error, (ValueError, UnicodeError)) else 409 if isinstance(error, RuntimeError) else 503
-        self.send_json(status, {"error": str(error) if status != 503 else "備份服務暫時失敗，請稍後重試"})
+        if status == 503:
+            logging.exception('Camera management request failed')
+        message = '事件服務暫時無法讀取，請稍後重試' if self.path.startswith('/events/') else '備份服務暫時失敗，請稍後重試'
+        self.send_json(status, {"error": str(error) if status != 503 else message})
 
     def do_GET(self):
         path = urlparse(self.path).path
         jobs, store = self.server.jobs, self.server.jobs.store
         try:
+            if path.startswith('/events/'):
+                timeline = self.server.timeline
+                if path == '/events/list':
+                    self.send_json(200, timeline.list(urlparse(self.path).query))
+                elif path.startswith('/events/exports/'):
+                    parts = path.split('/')
+                    job = timeline.job(parts[3])
+                    if len(parts) == 5 and parts[4] == 'download':
+                        if job['state'] != 'complete' or job['expires_at'] < time.time():
+                            raise ValueError('匯出尚未完成或已過期，請重新匯出')
+                        send_file(self, timeline.exports / (job['id'] + '.data.' + job['format']),
+                                  attachment='camera-events-' + job['id'][:12] + '.' + job['format'])
+                    else:
+                        self.send_json(200, {'job': job})
+                else:
+                    self.send_json(404, {'error': '找不到事件 API'})
+                return
             if path == "/policy":
                 self.send_json(200, backup_policy(store.state))
             elif path in {"/health", "/status"}:
@@ -154,7 +177,7 @@ class Handler(BaseHTTPRequestHandler):
                                      "same_device": store.root.stat().st_dev == maintenance.DATA.stat().st_dev,
                                      "free_bytes": disk.free, "total_bytes": disk.total,
                                      "data_free_bytes": data_disk.free, "latest": store.latest_name(),
-                                     "retention_days": 0, "permanent_delete_available": False})
+                                     "retention_days": 0, "permanent_delete_available": True})
             elif path == "/backups":
                 self.send_json(200, {"items": store.list(), "trash": store.list_trash(), "capacity": store.capacity()})
             elif path.startswith("/jobs/"):
@@ -169,6 +192,12 @@ class Handler(BaseHTTPRequestHandler):
         jobs, store = self.server.jobs, self.server.jobs.store
         try:
             data = read_body(self)
+            if path == '/events/favorite':
+                self.send_json(200, self.server.timeline.favorite(data.get('ids'), data.get('favorite')))
+                return
+            if path == '/events/export':
+                self.send_json(202, self.server.timeline.export(data.get('ids'), data.get('format', 'zip'), data.get('include_videos', False)))
+                return
             if path == "/policy":
                 with store.mutation():
                     result = save_backup_policy(store.state, data)
@@ -178,9 +207,9 @@ class Handler(BaseHTTPRequestHandler):
             if path in {"/create", "/verify", "/recover"}:
                 self.send_json(202, jobs.submit(path[1:], data.get("name")))
                 return
-            if path in {"/trash", "/restore"}:
+            if path in {"/trash", "/restore", "/purge"}:
                 with store.mutation():
-                    result = store.move_to_trash(data.get("name")) if path == "/trash" else store.restore(data.get("token"))
+                    result = store.move_to_trash(data.get("name")) if path == "/trash" else store.purge(data.get('token'),data.get('confirmation')) if path == '/purge' else store.restore(data.get("token"))
                     jobs.audit(path[1:], "complete", data.get("name") or data.get("token"))
                 self.send_json(200, result)
                 return
@@ -195,6 +224,7 @@ def main():
     server = ThreadingHTTPServer(("127.0.0.1", 8095), Handler)
     server.daemon_threads = True
     server.jobs = Jobs(store)
+    server.timeline = Timeline(maintenance.DATA, maintenance.RECORDINGS, maintenance.STATE)
     def stop(*args):
         threading.Thread(target=server.shutdown, daemon=True).start()
     signal.signal(signal.SIGTERM, stop)
@@ -206,6 +236,8 @@ def main():
         # Jobs hold the maintenance lock until their durable result is saved.
         if server.jobs.lock.acquire(timeout=3500):
             server.jobs.lock.release()
+        if server.timeline.export_lock.acquire(timeout=3500):
+            server.timeline.export_lock.release()
 
 
 if __name__ == "__main__":

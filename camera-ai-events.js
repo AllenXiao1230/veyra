@@ -32,7 +32,7 @@
 
   function timeText(value) {
     const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? escapeText(value) : date.toLocaleString();
+    return Number.isNaN(date.getTime()) ? escapeText(value) : new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(date);
   }
 
   async function refresh() {
