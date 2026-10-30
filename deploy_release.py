@@ -109,6 +109,10 @@ def _install(stage, manifest):
         log.touch(exist_ok=True)
         os.chown(log, account.pw_uid, account.pw_gid)
         log.chmod(0o640)
+        cache = Path('/srv/camera-monitor/cache/playback')
+        cache.mkdir(parents=True, exist_ok=True)
+        os.chown(cache, account.pw_uid, account.pw_gid)
+        cache.chmod(0o750)
         for row, old in zip(files, saved):
             path = Path(row["path"])
             path.parent.mkdir(parents=True, exist_ok=True)

@@ -137,7 +137,7 @@
     {
       "source": "LAYOUT.md",
       "path": "/srv/camera-monitor/app/management/LAYOUT.md",
-      "sha256": "4b18553282d9c81cf85516c87fb128306181fc64d3658405988f1b1b2acdcf46"
+      "sha256": "568fc696880a7b0c5debe400c645bfb8677933ed39511a489df934c9cbb57740"
     },
     {
       "source": "README_camera_monitor.md",
@@ -172,12 +172,12 @@
     {
       "source": "deploy_release.py",
       "path": "/srv/camera-monitor/app/management/deploy_release.py",
-      "sha256": "95c67456f74c1f0aa2d11f0a9bec68dd40b5f9e6c84df9207d2655fa26c08649"
+      "sha256": "61230ba300e8e8df279b969a75a434c1bea76631a92476961a2ac186f3b14eab"
     },
     {
       "source": "migrate_layout.py",
       "path": "/srv/camera-monitor/app/management/migrate_layout.py",
-      "sha256": "c29dcd03e1f9c49a1e5a5e7162983eb1e205a4ac78d961eb13ec1c1c6bf7b180"
+      "sha256": "c257f38cc9d4d5361772f53080cefe7e6c390c5252adae55afebd12a7407d94c"
     },
     {
       "source": "preflight.py",
@@ -309,7 +309,7 @@
     {
       "source": "camera-monitor.tmpfiles",
       "path": "/srv/camera-monitor/config/tmpfiles/camera-monitor.conf",
-      "sha256": "5e7dd5d15c752a4ec4846f7696fda8d4af0a231478f9f7ee47a8455c2980393c"
+      "sha256": "d7ee7715d7bd13cd52990958c2276c82fa9c52409aaa82aba45e7a7919c6b13b"
     },
     {
       "source": "backups.html",

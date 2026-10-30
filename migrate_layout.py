@@ -26,7 +26,9 @@ USER_ENV = ['runuser', '-u', 'xuan', '--', 'env', 'XDG_RUNTIME_DIR=/run/user/100
 
 
 def run(*args, timeout=120):
-    result = subprocess.run(args, check=True, text=True, capture_output=True, timeout=timeout)
+    result = subprocess.run(args, text=True, capture_output=True, timeout=timeout)
+    if result.returncode:
+        raise RuntimeError('Command failed: ' + repr(args) + '\n' + result.stderr[-4000:] + result.stdout[-1000:])
     return result.stdout.strip()
 
 

@@ -45,6 +45,8 @@ systemd 需在 `/etc/systemd/system/` 及使用者的 systemd 設定目錄註冊
 
 `/run/camera-monitor/` 的跨程序鎖、`/run/user/1000/` 的 PipeWire／DBus socket 與暫存執行狀態留在標準 runtime 位置，重開機由 tmpfiles 重建。Ubuntu 套件、uStreamer snap、systemd journal、Tailscale 身分與其他應用程式不搬入專案。
 
+持久快取由搬移保留或部署程式明確建立，tmpfiles 只管理 `/run`，避免共用 `/srv` 為一般使用者擁有時的安全路徑檢查拒絕；不修改共用 `/srv` 的權限。
+
 ## 維護與備份
 
 ```sh

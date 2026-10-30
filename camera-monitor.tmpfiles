@@ -1,4 +1,2 @@
 d /run/camera-monitor 0755 root root -
 f /run/camera-monitor/media.lock 0444 root root -
-d /srv/camera-monitor/cache 0755 root root -
-d /srv/camera-monitor/cache/playback 0750 camera-recorder camera-recorder -
