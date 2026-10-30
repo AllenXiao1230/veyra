@@ -11,7 +11,7 @@ import shutil
 import uuid
 import urllib.request
 import sys
-sys.path.append("/opt/camera-common")
+sys.path.append("/srv/camera-monitor/app/common")
 from camera_catalog import inspect_recording
 from camera_media import MediaLibrary, media_error, send_file
 from camera_state import atomic_json, media_guard
@@ -27,12 +27,12 @@ from urllib.parse import unquote, urlparse
 
 HOST = "127.0.0.1"
 PORT = 8091
-VIDEO_DIR = "/var/lib/camera-recorder"
+VIDEO_DIR = "/srv/camera-monitor/data/recordings"
 SOURCE = "http://127.0.0.1:8080/stream"
 RECORDING_SOURCE = "http://127.0.0.1:8093/stream"
 AUDIO_SOURCE = "rtsp://127.0.0.1:8554/mic"
 FILENAME_RE = re.compile(r"^recording-\d{8}-\d{6}(?:-[0-9a-f]{12})?\.(mp4|mkv)$")
-LOG_FILE = "/var/log/camera-recorder-ffmpeg.log"
+LOG_FILE = "/srv/camera-monitor/logs/camera-recorder-ffmpeg.log"
 lock = threading.RLock()
 operation_lock = threading.RLock()
 session_lock = threading.RLock()

@@ -18,14 +18,14 @@ def deployment_active(path=MARKER):
 
 
 @contextmanager
-def deployment_guard(state=Path('/var/lib/camera-maintenance'), marker=MARKER):
+def deployment_guard(state=Path('/srv/camera-monitor/data/maintenance'), marker=MARKER):
     import fcntl
     state.mkdir(parents=True,exist_ok=True);marker.parent.mkdir(parents=True,exist_ok=True)
     with (state/'data-maintenance.lock').open('a') as lock:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError as error:raise RuntimeError('Wait for backup/maintenance before deploying') from error
         try:
-            with media_guard('/var/lib/camera-ai'):
+            with media_guard('/srv/camera-monitor/data/ai'):
                 atomic_json(marker,{'pid':os.getpid(),'expires':time.monotonic()+7200})
                 marker.chmod(0o644)
             yield

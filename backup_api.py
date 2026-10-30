@@ -14,7 +14,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-sys.path.append("/opt/camera-common")
+sys.path.append("/srv/camera-monitor/app/common")
 import camera_maintenance as maintenance
 from camera_backups import BackupStore, verify_backup
 from camera_media import read_body

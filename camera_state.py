@@ -36,7 +36,10 @@ def atomic_json(path, value):
 def media_guard(root):
     """Production processes share a read-openable flock; fixtures stay isolated."""
     target = os.environ.get("CAMERA_MEDIA_LOCK")
-    if not target and str(Path(root).resolve()).startswith("/var/lib/camera"):
+    resolved = Path(root).resolve()
+    production_data = Path('/srv/camera-monitor/data')
+    if not target and (resolved == production_data or production_data in resolved.parents
+                       or str(resolved).startswith('/var/lib/camera')):
         target = "/run/camera-monitor/media.lock"
     if not target or os.name == "nt":
         yield

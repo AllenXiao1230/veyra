@@ -1,4 +1,4 @@
-/var/log/camera-recorder-ffmpeg.log {
+/srv/camera-monitor/logs/camera-recorder-ffmpeg.log {
     daily
     rotate 7
     maxsize 10M

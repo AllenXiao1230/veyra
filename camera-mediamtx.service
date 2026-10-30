@@ -1,0 +1,13 @@
+[Unit]
+Description=MediaMTX camera audio WebRTC
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/srv/camera-monitor/vendor/mediamtx/mediamtx /srv/camera-monitor/config/mediamtx/mediamtx.yml
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

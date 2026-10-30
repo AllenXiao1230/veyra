@@ -15,7 +15,7 @@ import sqlite3
 import threading
 import time
 import sys
-sys.path.append("/opt/camera-common")
+sys.path.append("/srv/camera-monitor/app/common")
 from camera_runtime import MJPEGCapture
 from camera_media import MediaLibrary, media_error, read_body, send_file
 from camera_state import media_guard
@@ -96,7 +96,7 @@ class Settings:
             host=values.get("LISTEN_HOST", "127.0.0.1"),
             port=int_value(values, "LISTEN_PORT", 8092, 1),
             stream_url=values.get("STREAM_URL", "http://127.0.0.1:8080/stream"),
-            data_dir=Path(values.get("DATA_DIR", "/var/lib/camera-ai")),
+            data_dir=Path(values.get("DATA_DIR", "/srv/camera-monitor/data/ai")),
             capture_width=int_value(values, "CAPTURE_WIDTH", 640, 160),
             frame_interval_seconds=float_value(values, "FRAME_INTERVAL_SECONDS", 0.5, 0.05),
             warmup_frames=int_value(values, "WARMUP_FRAMES", 60, 0),
@@ -105,7 +105,7 @@ class Settings:
             event_cooldown_seconds=float_value(values, "EVENT_COOLDOWN_SECONDS", 15.0, 0.0),
             jpeg_quality=int_value(values, "JPEG_QUALITY", 88, 30),
             person_detector=values.get("PERSON_DETECTOR", "off").strip().lower(),
-            onnx_model=Path(values.get("ONNX_MODEL", "/opt/camera-ai/models/person-detection.onnx")),
+            onnx_model=Path(values.get("ONNX_MODEL", "/srv/camera-monitor/app/ai/models/person-detection.onnx")),
             person_threshold=float_value(values, "PERSON_THRESHOLD", 0.50, 0.05),
             onnx_input_size=int_value(values, "ONNX_INPUT_SIZE", 320, 160),
         )
@@ -608,7 +608,7 @@ class ApiHandler(BaseHTTPRequestHandler):
 def main() -> int:
     cv2.setNumThreads(2)
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    settings = Settings.from_file(Path(os.environ.get("CAMERA_AI_CONFIG", "/etc/camera-ai/camera-ai.env")))
+    settings = Settings.from_file(Path(os.environ.get("CAMERA_AI_CONFIG", "/srv/camera-monitor/config/ai/camera-ai.env")))
     if settings.host not in {"127.0.0.1", "::1"}:
         raise RuntimeError("LISTEN_HOST must remain loopback-only")
     service = DetectorService(settings)

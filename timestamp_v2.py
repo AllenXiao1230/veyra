@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 import cv2
 
-sys.path.insert(0, "/opt/camera-common")
+sys.path.insert(0, "/srv/camera-monitor/app/common")
 from camera_runtime import MJPEGCapture
 
 SOURCE = "http://127.0.0.1:8080/stream"

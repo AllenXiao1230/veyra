@@ -1,0 +1,15 @@
+[Unit]
+Description=Camera Recorder - Hourly MJPEG Segments
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ffmpeg -hide_banner -loglevel warning -nostdin -rw_timeout 15000000 -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -f mpjpeg -i http://127.0.0.1:8080/stream -map 0:v:0 -an -c:v copy -f segment -segment_time 3600 -reset_timestamps 1 -strftime 1 /srv/camera-monitor/data/recordings/recording-%%Y%%m%%d-%%H%%M%%S.mkv
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=30
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

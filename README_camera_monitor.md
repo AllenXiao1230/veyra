@@ -1,5 +1,7 @@
 # Ubuntu Camera Monitor
 
+目前正式專案根目錄為 `/srv/camera-monitor/`，完整資料結構見 [LAYOUT.md](LAYOUT.md)。歷史舊路徑仍有相容連結，新的服務使用 `/srv` 路徑。
+
 > 專案文件版本：2026-10-30 reliability1（錄影輸出恢復、純影像降級、保存與本機診斷）\
 > 文件語言：繁體中文\
 > 目前選定架構：**方案 B --- 由 Ubuntu

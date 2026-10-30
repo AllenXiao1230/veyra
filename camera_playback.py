@@ -8,7 +8,7 @@ import subprocess
 import threading
 import uuid
 
-CACHE = Path('/var/cache/camera-monitor/playback')
+CACHE = Path('/srv/camera-monitor/cache/playback')
 MAX_BYTES = 2 * 1024 ** 3
 _lock = threading.Lock()
 _slots = threading.BoundedSemaphore(3)

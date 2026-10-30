@@ -18,18 +18,18 @@ from contextlib import closing
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
-sys.path.append("/opt/camera-common")
+sys.path.append("/srv/camera-monitor/app/common")
 from camera_state import media_guard, atomic_json
 from camera_backups import index_files
 from camera_storage import check_backup_budget, reserve_space
 from camera_media import MediaLibrary
 from camera_diagnostics import ingress_check
 
-STATE = pathlib.Path("/var/lib/camera-maintenance")
-BACKUPS = pathlib.Path("/var/backups/camera-monitor/snapshots")
-CONFIG = pathlib.Path("/etc/camera-monitor-maintenance.json")
-DATA = pathlib.Path("/var/lib/camera-ai")
-RECORDINGS = pathlib.Path("/var/lib/camera-recorder")
+STATE = pathlib.Path("/srv/camera-monitor/data/maintenance")
+BACKUPS = pathlib.Path("/srv/camera-monitor/backups/snapshots")
+CONFIG = pathlib.Path("/srv/camera-monitor/config/maintenance.json")
+DATA = pathlib.Path("/srv/camera-monitor/data/ai")
+RECORDINGS = pathlib.Path("/srv/camera-monitor/data/recordings")
 
 
 def read_json(path, default):
@@ -200,12 +200,9 @@ def backup(dry_run=False, progress=None):
 
 
 def configuration_entries():
-    paths = ["/opt/camera-ai", "/opt/camera-recorder", "/opt/camera-timestamp", "/opt/camera-common", "/opt/camera-monitor",
-             "/etc/camera-ai", "/etc/nginx", "/etc/camera-monitor-maintenance.json",
-             "/etc/logrotate.d/camera-recorder", "/var/www/camera-monitor",
-             "/home/xuan/.config/systemd/user", "/home/xuan/.config/mediamtx", "/home/xuan/.config/camera-monitor",
-             "/usr/local/sbin/camera-maintenance"]
-    paths += [str(p) for p in pathlib.Path("/etc/systemd/system").glob("camera-*")]
+    # Archive actual project files, not OS registration symlinks or other apps.
+    # Data/backups/archive are deliberately outside this configuration archive.
+    paths = ['/srv/camera-monitor/' + name for name in ('app', 'config', 'web', 'bin', 'vendor')]
     return [(pathlib.Path(p), str(p).lstrip("/")) for p in paths if pathlib.Path(p).exists()]
 
 
@@ -214,7 +211,7 @@ def _finish_backup(destination, pins, plan, skipped, progress):
         for path, name in configuration_entries():
             archive.add(path, arcname=name)
     with tarfile.open(destination / "configuration.tar.gz") as archive:
-        assert "opt/camera-ai/camera_ai.py" in archive.getnames()
+        assert {'srv/camera-monitor/app/ai/camera_ai.py', 'opt/camera-ai/camera_ai.py'}.intersection(archive.getnames())
     previous = BACKUPS / "latest"
     baseline = previous.resolve() if previous.is_symlink() else None
     if baseline:

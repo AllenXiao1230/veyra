@@ -1,0 +1,27 @@
+[Unit]
+Description=Camera Monitor AI motion and optional person event service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=camera-ai
+Group=camera-ai
+WorkingDirectory=/srv/camera-monitor/app/ai
+Environment=CAMERA_AI_CONFIG=/srv/camera-monitor/config/ai/camera-ai.env
+ExecStart=/usr/bin/python3 /srv/camera-monitor/app/ai/camera_ai.py
+Restart=on-failure
+RestartSec=5
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/srv/camera-monitor/data/ai
+RestrictAddressFamilies=AF_INET AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

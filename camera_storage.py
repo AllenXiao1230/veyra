@@ -75,7 +75,7 @@ def tree_usage(root, exclude=()):
     return {'files':count,'logical_bytes':logical,'physical_bytes':physical}
 
 
-def storage_summary(data, recordings, backups, state, playback=Path('/var/cache/camera-monitor/playback')):
+def storage_summary(data, recordings, backups, state, playback=Path('/srv/camera-monitor/cache/playback')):
     data,recordings,backups,state = map(Path,(data,recordings,backups,state))
     categories = {'recordings':tree_usage(recordings,('.trash','.metadata')),
                   'snapshots':tree_usage(data/'snapshots'),

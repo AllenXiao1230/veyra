@@ -111,7 +111,7 @@ def verify_backup(root, progress=None):
             if name and not checked_member(root / "snapshots", name).is_file():
                 raise ValueError("備份缺少事件快照")
     with tarfile.open(root / "configuration.tar.gz") as archive:
-        if "opt/camera-ai/camera_ai.py" not in archive.getnames():
+        if not {'srv/camera-monitor/app/ai/camera_ai.py', 'opt/camera-ai/camera_ai.py'}.intersection(archive.getnames()):
             raise ValueError("備份缺少服務設定")
     # Legacy checks establish a new baseline, not proof against pre-existing tampering.
     if legacy:

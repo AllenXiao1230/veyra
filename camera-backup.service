@@ -4,11 +4,10 @@ After=network-online.target camera-ai.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/camera-maintenance backup
+ExecStart=/srv/camera-monitor/bin/camera-maintenance backup
 TimeoutStartSec=3600
 Nice=10
 IOSchedulingClass=idle
 UMask=0077
-StateDirectory=camera-maintenance
 NoNewPrivileges=true
 PrivateTmp=true

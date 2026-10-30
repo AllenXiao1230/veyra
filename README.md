@@ -1,5 +1,7 @@
 # Camera Monitor
 
+正式目錄已統一為 `/srv/camera-monitor/`；結構、系統入口與相容路徑見 [LAYOUT.md](LAYOUT.md)。來源位於 `source/`，執行程式、設定與資料分開管理。下列歷史版本紀錄中的舊路徑由相容連結保留。
+
 Ubuntu 攝影機監控專案的維護來源，包含 `hybrid1`、`stability1`、`mobile1` 與 `reliability1` 擴充：背景移動偵測、事件快照、時間戳直播、
 動態錄影、事件時間軸、健康監控與本機增量備份。網頁透過 nginx 和 Tailscale 提供私有存取。
 

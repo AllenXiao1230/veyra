@@ -23,7 +23,7 @@ class BackupTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def fixture(self, name="20261029-010000-000001", legacy=False):
+    def fixture(self, name="20261029-010000-000001", legacy=False, configuration='opt/camera-ai/camera_ai.py'):
         folder = self.store.root / name
         (folder / "snapshots").mkdir(parents=True)
         (folder / "snapshots" / "sample.jpg").write_bytes(b"fixture bytes")
@@ -32,7 +32,7 @@ class BackupTests(unittest.TestCase):
             db.execute("INSERT INTO events VALUES(1,'sample.jpg')")
         db.close()
         with tarfile.open(folder / "configuration.tar.gz", "w:gz") as archive:
-            entry = tarfile.TarInfo("opt/camera-ai/camera_ai.py")
+            entry = tarfile.TarInfo(configuration)
             entry.size = 7
             archive.addfile(entry, io.BytesIO(b"fixture"))
         manifest = {"complete": True, "created_at": time.time()}
@@ -40,6 +40,10 @@ class BackupTests(unittest.TestCase):
             manifest.update(schema=2, files=index_files(folder))
         atomic_json(folder / "manifest.json", manifest)
         return folder
+
+    def test_verification_accepts_new_srv_configuration_without_rewriting_old_archives(self):
+        folder=self.fixture(configuration='srv/camera-monitor/app/ai/camera_ai.py')
+        self.assertTrue(verify_backup(folder)['ok'])
 
     def test_permanent_delete_requires_confirmation_and_stays_inside_trash(self):
         original = self.fixture()

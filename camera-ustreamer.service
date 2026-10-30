@@ -1,0 +1,12 @@
+[Unit]
+Description=Camera Monitor - uStreamer
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/snap run ustreamer --device=/dev/video0 --host=127.0.0.1 --port=8080 --format=MJPEG --resolution=1280x720 --desired-fps=30
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

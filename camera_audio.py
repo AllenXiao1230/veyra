@@ -13,7 +13,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-CONFIG = pathlib.Path.home() / ".config/camera-monitor/audio.json"
+CONFIG = pathlib.Path('/srv/camera-monitor/config/audio/audio.json')
 RTSP = "rtsp://127.0.0.1:8554/mic"
 
 

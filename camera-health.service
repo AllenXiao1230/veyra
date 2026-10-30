@@ -4,9 +4,8 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/camera-maintenance check --repair
+ExecStart=/srv/camera-monitor/bin/camera-maintenance check --repair
 TimeoutStartSec=180
-StateDirectory=camera-maintenance
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true

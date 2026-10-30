@@ -7,7 +7,7 @@ After=camera-mediamtx.service pipewire-pulse.service
 Type=simple
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=PULSE_SERVER=unix:/run/user/1000/pulse/native
-ExecStart=/usr/bin/python3 /opt/camera-common/camera_audio.py
+ExecStart=/usr/bin/python3 /srv/camera-monitor/app/common/camera_audio.py
 Restart=always
 RestartSec=5
 TimeoutStopSec=15

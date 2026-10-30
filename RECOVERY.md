@@ -1,14 +1,16 @@
 # 重建、預檢與回滾
 
+目前結構及相容路徑見 [LAYOUT.md](LAYOUT.md)。原始碼位於 `/srv/camera-monitor/source/`；乾淨主機需先按目錄圖建立資料夾與系統註冊連結，再啟動服務。一次性搬移工具用於既有主機，不是乾淨主機安裝器。
+
 本專案目前使用 Ubuntu、systemd、Python/OpenCV、FFmpeg/VAAPI、uStreamer、MediaMTX、PipeWire 與 Tailscale 私有 HTTPS。完整來源清單不包含影片、快照、ONNX 權重、密碼、Tailscale 身分或正式憑證。
 
 ## 目前發版清單
 
-在來源根目錄執行 `python3 release_manifest.py --release camera-monitor-reliability1 --output camera-monitor-reliability1-manifest.json`，可建立所有現役映射的 SHA-256。歷版 manifest 保留作歷史，已退役的音訊 readiness override 不重裝。
+在來源根目錄執行 `python3 release_manifest.py --release camera-monitor-layout1 --output camera-monitor-layout1-manifest.json`，可建立所有現役映射的 SHA-256。歷版 manifest 保留作歷史，已退役的音訊 readiness override 不重裝。
 
 安裝器只替換不同雜湊的程式／設定、只重啟受影響服務；不再遞迴 chown 錄影。部署期間拒絕新錄影與匯出，等待中的備份／清理鎖會使部署安全拒絕。已有錄影或匯出時須待其完成，不能用部署強行中斷工作。
 
-完成後 `/opt/camera-monitor/current-release.json` 是本次完整清單；每版程式／設定的回滾位於 `/var/backups/camera-monitor/releases/`。清單不是備份，也不包含日後變動的使用者設定與媒體。
+完成後 `/srv/camera-monitor/app/management/current-release.json` 是本次完整清單；每版程式／設定的回滾位於 `/srv/camera-monitor/backups/releases/`。清單不是備份，也不包含日後變動的使用者設定與媒體。
 
 ## 乾淨主機恢復流程
 
@@ -24,6 +26,6 @@
 
 ## 回滾
 
-使用 staging 中的安裝器副本執行 `sudo python3 deploy_release.py --rollback /var/backups/camera-monitor/releases/<版本>`。回滾只恢復程式與部署設定，不刪除正式媒體或覆寫使用者設定。新增 SQLite 欄位採加法遷移；舊程式讀取後可能忽略新狀態，降版前應保存資料庫副本並驗證該版本是否仍能開啟。
+使用 staging 中的安裝器副本執行 `sudo python3 deploy_release.py --rollback /srv/camera-monitor/backups/releases/<版本>`。回滾只恢復程式與部署設定，不刪除正式媒體或覆寫使用者設定。新增 SQLite 欄位採加法遷移；舊程式讀取後可能忽略新狀態，降版前應保存資料庫副本並驗證該版本是否仍能開啟。
 
 外部備份位置尚未設定；本機同磁碟副本無法防護整顆磁碟故障。不要把任意其他服務的掛載目錄視為本專案已獲授權的備份目的地。

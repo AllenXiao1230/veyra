@@ -7,13 +7,13 @@ server {
 
     location = /snapshots.html {
         add_header Cache-Control "no-store, max-age=0" always;
-        root /var/www/camera-monitor;
+        root /srv/camera-monitor/web;
         try_files /snapshots.html =404;
     }
 
     location = /backups.html {
         add_header Cache-Control "no-store, max-age=0" always;
-        root /var/www/camera-monitor;
+        root /srv/camera-monitor/web;
         try_files /backups.html =404;
     }
 
@@ -34,25 +34,25 @@ server {
 
     location ~ ^/camera-(ui\.css|ui\.js|live\.js|library\.js|backups\.js|mobile\.js|timeline\.js)$ {
         add_header Cache-Control "no-cache" always;
-        root /var/www/camera-monitor;
+        root /srv/camera-monitor/web;
         try_files $uri =404;
     }
 
     location = /recordings.html {
         add_header Cache-Control "no-store, max-age=0" always;
-        root /var/www/camera-monitor;
+        root /srv/camera-monitor/web;
         try_files /recordings.html =404;
     }
 
     location = / {
         add_header Cache-Control "no-store, max-age=0" always;
-        root /var/www/camera-monitor;
+        root /srv/camera-monitor/web;
         try_files /index.html =404;
     }
 
     location = /index.html {
         add_header Cache-Control "no-store, max-age=0" always;
-        root /var/www/camera-monitor;
+        root /srv/camera-monitor/web;
         try_files /index.html =404;
     }
 
@@ -110,7 +110,7 @@ location /camera/ {
 
     location = /camera-audio-controls.js {
         add_header Cache-Control "no-cache" always;
-        root /var/www/camera-monitor;
+        root /srv/camera-monitor/web;
         try_files $uri =404;
     }
 
@@ -145,11 +145,11 @@ location /camera/ {
     }
     location = /camera-ai-events.js {
         add_header Cache-Control "no-cache" always;
-        root /var/www/camera-monitor;
+        root /srv/camera-monitor/web;
         try_files $uri =404;
     }
     location = /camera-ai-events.css {
-        root /var/www/camera-monitor;
+        root /srv/camera-monitor/web;
         try_files $uri =404;
     }
     # END camera-ai

@@ -5,20 +5,19 @@ After=network.target camera-ai.service camera-recorder-api.service
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/camera-monitor
-ExecStart=/usr/bin/python3 /opt/camera-monitor/backup_api.py
+WorkingDirectory=/srv/camera-monitor/app/management
+ExecStart=/usr/bin/python3 /srv/camera-monitor/app/management/backup_api.py
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=3600
 LimitNOFILE=16384
-StateDirectory=camera-maintenance
 UMask=0077
 Nice=10
 IOSchedulingClass=idle
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/camera-maintenance /var/backups/camera-monitor
+ReadWritePaths=/srv/camera-monitor/data/maintenance /srv/camera-monitor/backups
 RestrictAddressFamilies=AF_INET AF_UNIX
 LockPersonality=true
 
