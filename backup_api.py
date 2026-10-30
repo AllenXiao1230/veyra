@@ -135,7 +135,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         try:
-            self.wfile.write(body)
+            if self.command != 'HEAD':
+                self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError):
             pass
 
@@ -145,6 +146,13 @@ class Handler(BaseHTTPRequestHandler):
             logging.exception('Camera management request failed')
         message = '事件服務暫時無法讀取，請稍後重試' if self.path.startswith('/events/') else '備份服務暫時失敗，請稍後重試'
         self.send_json(status, {"error": str(error) if status != 503 else message})
+
+    def do_HEAD(self):
+        path = urlparse(self.path).path
+        if path.startswith('/events/exports/') and path.endswith('/download'):
+            self.do_GET()
+        else:
+            self.send_json(404, {'error': '找不到下載路徑'})
 
     def do_GET(self):
         path = urlparse(self.path).path

@@ -121,9 +121,10 @@ assert timeline.job(job['id'])['state']=='complete'
         server.timeline=self.timeline;server.jobs=SimpleNamespace(store=None)
         threading.Thread(target=server.serve_forever,daemon=True).start()
         self.addCleanup(server.server_close);self.addCleanup(server.shutdown)
-        def call(method,path,body=None,origin=None):
+        def call(method,path,body=None,origin=None,extra_headers=None):
             conn=http.client.HTTPConnection('127.0.0.1',server.server_port,timeout=5)
             headers={'Content-Type':'application/json'}
+            headers.update(extra_headers or {})
             if origin:headers['Origin']=origin
             conn.request(method,path,json.dumps(body) if body is not None else None,headers)
             response=conn.getresponse();result=(response.status,dict(response.getheaders()),response.read());conn.close();return result
@@ -135,6 +136,13 @@ assert timeline.job(job['id'])['state']=='complete'
         code,headers,body=call('GET','/events/exports/'+job['id']+'/download')
         self.assertEqual(code,200);self.assertIn('attachment',headers['Content-Disposition'])
         self.assertEqual(json.loads(body)['events'][0]['id'],1)
+        download = '/events/exports/'+job['id']+'/download'
+        code,head_headers,head_body=call('HEAD',download)
+        self.assertEqual((code,head_body),(200,b''))
+        self.assertEqual(int(head_headers['Content-Length']),len(body))
+        code,resume_headers,suffix=call('GET',download,extra_headers={'Range':'bytes=17-','If-Range':headers['ETag']})
+        self.assertEqual(code,206)
+        self.assertEqual(suffix,body[17:])
 
 
 class PurgeTests(unittest.TestCase):

@@ -2,7 +2,6 @@
 import base64
 import hashlib
 import json
-import mimetypes
 import os
 import pathlib
 import re
@@ -17,6 +16,7 @@ from urllib.parse import parse_qs, quote
 from camera_state import atomic_json, media_guard, sync_directory
 from camera_index import MediaIndex
 from camera_jobs import ThumbnailJobs
+from camera_http import serve_file
 
 TAIPEI = timezone(timedelta(hours=8))
 _thumbnail_jobs = ThumbnailJobs()
@@ -52,21 +52,8 @@ def media_error(handler, error):
 
 
 def send_file(handler, path, cache="no-store", attachment=None):
-    # Open before sending headers, so a concurrent trash operation cannot truncate the response.
-    with pathlib.Path(path).open("rb") as stream:
-        handler.send_response(200)
-        handler.send_header("Content-Type", mimetypes.guess_type(str(path))[0] or "application/octet-stream")
-        handler.send_header("Content-Length", str(os.fstat(stream.fileno()).st_size))
-        handler.send_header("Cache-Control", cache)
-        handler.send_header("X-Content-Type-Options", "nosniff")
-        if attachment:
-            handler.send_header("Content-Disposition", 'attachment; filename="' + attachment + '"')
-        handler.end_headers()
-        try:
-            while chunk := stream.read(65536):
-                handler.wfile.write(chunk)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+    serve_file(handler, path, cache=cache, attachment=attachment,
+               head=getattr(handler, 'command', 'GET') == 'HEAD')
 
 
 class MediaLibrary:

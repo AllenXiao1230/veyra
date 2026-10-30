@@ -1,0 +1,41 @@
+{
+  "release": "camera-monitor-download1",
+  "date": "2026-10-30",
+  "files": [
+    {
+      "source": "camera_http.py",
+      "path": "/opt/camera-common/camera_http.py",
+      "sha256": "f7b04e64140b177f01e2858295ab44279ab4e0992d068484393f644cbb773b9b"
+    },
+    {
+      "source": "camera_media.py",
+      "path": "/opt/camera-common/camera_media.py",
+      "sha256": "f06da0fcae9d95d1864a3ccfb37b783bfc83689a883352e2631ff413e7522c98"
+    },
+    {
+      "source": "backup_api.py",
+      "path": "/opt/camera-monitor/backup_api.py",
+      "sha256": "65f4a93477eae7f647657136e2d9821cfccc5ac87f047d850ab706b28872f844"
+    },
+    {
+      "source": "nginx-camera-monitor",
+      "path": "/etc/nginx/sites-enabled/camera-monitor",
+      "sha256": "df02876195b6d05e4f43e3b00a6a100c8f8fc8a94446552c4ccf22ced547b7e6"
+    },
+    {
+      "source": "nginx-camera-monitor",
+      "path": "/etc/nginx/sites-available/camera-monitor",
+      "sha256": "df02876195b6d05e4f43e3b00a6a100c8f8fc8a94446552c4ccf22ced547b7e6"
+    },
+    {
+      "source": "README_camera_monitor.md",
+      "path": "/opt/camera-monitor/README.md",
+      "sha256": "9027ef872caff2572624245071fae9fc1a6c24bbe3c372ccbb747b14ba3e0ecc"
+    },
+    {
+      "source": "CHANGELOG.md",
+      "path": "/opt/camera-monitor/CHANGELOG.md",
+      "sha256": "143a9c756f1add953f6fd8c310c6dd50ab66c7d9bb510a7cdc9f7e46962a1d97"
+    }
+  ]
+}
