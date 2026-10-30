@@ -1,0 +1,26 @@
+[Unit]
+Description=Camera Monitor integrated WebRTC and HLS publisher
+After=network.target camera-timestamp.service
+Wants=camera-timestamp.service
+
+[Service]
+Type=simple
+User=camera-recorder
+Group=camera-recorder
+SupplementaryGroups=video render
+ExecStart=/usr/bin/python3 /srv/camera-monitor/app/common/camera_stream.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_INET AF_UNIX
+LockPersonality=true
+MemoryMax=384M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

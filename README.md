@@ -5,8 +5,21 @@
 Ubuntu 攝影機監控專案的維護來源，包含 `hybrid1`、`stability1`、`mobile1` 與 `reliability1` 擴充：背景移動偵測、事件快照、時間戳直播、
 動態錄影、事件時間軸、健康監控與本機增量備份。網頁透過 nginx 和 Tailscale 提供私有存取。
 
+目前版本為 `features1`，加入站內故障／恢復通知、工作與下載中心、進階事件查找及整合音畫串流，詳見 [FEATURES_20261031.md](FEATURES_20261031.md)。下方具版本名稱的章節保留各版沿革；現役部署清單為 `camera-monitor-features1-manifest.json`。
+
 這份 repository 是既有服務的維護來源，不是從零安裝套件；各版本的部署／驗收結果須以對應交付紀錄為準。完整操作說明與驗收限制見
 [README_camera_monitor.md](README_camera_monitor.md)。
+
+## 新功能入口（features1）
+
+- 共用頁首的「通知」顯示六項服務、儲存、備份新鮮度、入口及服務警告的確認異常／恢復；連續兩次檢查異常才通知，設有去重與冷卻。未讀及已讀狀態保存於伺服器；設定視窗可調整通知。只做站內通知，不會即時通知每個工作失敗。
+- 頁首「工作與下載」整合 API 備份／驗證／隔離還原工作、事件匯出及原檔下載捷徑，可篩選、分頁及重試；取消僅適用事件匯出。它不包含作業系統排程工作的完整歷史。「已準備好」只代表伺服器可供下載，瀏覽器是否已存檔由使用者確認。
+- 「快照 → 事件時間軸 → 進階查找」可組合台北起訖時間、關鍵字、標籤、AI 最低信心、媒體狀態及排序，網址可重開條件；事件預覽內可保存標籤與備註，納入匯出與備份。
+- 「設定 → 影像 → 即時串流」可選「音畫整合（低延遲）」或「音畫整合（穩定優先）」；單一 H.264 編碼分送 WebRTC／Opus 與 HLS／AAC，必要時回原影格。手機自動模式仍採低頻寬，播放聲音需點按，背景會卸載播放器。有動作即記錄、AI 僅標註及原有 30 秒停止延遲不變。
+
+現役六項健康 API 為 loopback 8091–8096，經既有私有 Nginx／Tailscale 入口；路由與資料位置見 [LAYOUT.md](LAYOUT.md)。新增套件需求為 Ubuntu `python3-yaml`。HLS 使用本站按需載入的完整 hls.js 1.7.2（MIT，[LICENSE-hls.txt](LICENSE-hls.txt)），不在播放時向 CDN 取程式。Range 續傳、私有檔案 404 與既有正式設定保留規則不變。
+
+本輪 Linux 136 項單元測試及本機 4 組 Node 測試通過；伺服器未安裝 Node。六項服務健康與本機入口檢查不能代替實體 iPhone 的可聽聲音、觸控、長時間記憶體或穩定外網整檔下載驗收，這些仍未驗證。完整證據界線見功能紀錄。
 
 ## 錄影與資料可靠性（reliability1）
 
@@ -42,10 +55,13 @@ AI 改用有界背景佇列，動作先記錄，時間軸明示「AI 分析中�
 | `camera_audio.py` | `/opt/camera-common/camera_audio.py`，來源選擇、音訊 API 與發布 supervisor |
 | `camera_media.py` | `/opt/camera-common/camera_media.py`，完整媒體清單、日期分類、縮圖與回收桶 |
 | `camera_timeline.py` | `/opt/camera-common/camera_timeline.py`，事件分頁、收藏與伺服器匯出 |
+| `camera_notifications.py`、`camera_work.py` | `/srv/camera-monitor/app/common/`，站內通知與跨 API 工作目錄 |
+| `camera_stream.py`、`camera_stream_config.py`、`camera-stream.service` | 整合音畫發布、保留既有 MediaMTX 設定的合併工具及 systemd 服務 |
 | `camera_annotations.py`、`camera_sessions.py`、`camera_storage.py`、`camera_diagnostics.py` | 有界 AI 分類、逐檔對帳、空間預留與本機入口檢查 |
 | `release_manifest.py`、`preflight.py`、`camera_deployment.py` | 完整來源清單、唯讀主機預檢與部署期間工作閘門 |
 | `camera-ui.css`、`camera-ui.js`、`camera-live.js`、`camera-library.js` | 共用介面、設定、監看與媒體互動 |
 | `camera-mobile.js`、`camera-timeline.js`、`camera-backups.js` | 單張 JPEG 生命週期、事件時間軸與備份管理 |
+| `camera-center.js`、`camera-stream.js`、`hls.min.js`、`LICENSE-hls.txt` | 頁首工具、音畫播放器、本站 HLS 完整 build 與授權 |
 | `camera-audio.service` | 使用者 unit，`~/.config/systemd/user/camera-audio.service` |
 | `camera-audio-controls.js` | 網頁音訊控制；API 經 `/audio-api/` 代理至 loopback 8094 |
 | `live.html`、`snapshots.html`、`recordings.html`、`backups.html` | `/var/www/camera-monitor/`；live.html 部署為 index.html，舊 motion.html 網址轉向快照 |
@@ -53,13 +69,14 @@ AI 改用有界背景佇列，動作先記錄，時間軸明示「AI 分析中�
 | `nginx-camera-monitor` | loopback Web 入口與反向代理設定 |
 | `camera-monitor-fix1-manifest.json` | 24 個部署檔案的路徑與 SHA-256 |
 | `camera-monitor-*-manifest.json` | 各版部署檔案的路徑與 SHA-256；依本次交付紀錄選用對應版本 |
+| `camera-monitor-features1-manifest.json` | 目前完整清單；84 個部署檔案，另加 current-release 共核對 85 個檔案 |
 
 檔案保持平面配置，便於核對部署內容與在隔離目錄執行既有測試。Repository 不包含
 錄影、快照、事件資料庫、密碼、SSH 連線工具或正式環境的憑證。
 
 ## 測試
 
-在具有 Python 3、OpenCV、NumPy、FFmpeg 及 rsync 的 Ubuntu 主機上執行：
+在具有 Python 3、OpenCV、NumPy、PyYAML（Ubuntu `python3-yaml`）、FFmpeg 及 rsync 的 Ubuntu 主機上執行：
 
 ```bash
 python3 test_camera_fixes.py
@@ -68,7 +85,10 @@ python3 test_camera_media.py
 sudo python3 test_camera_maintenance.py
 python3 test_camera_events.py
 python3 test_camera_reliability.py
+python3 test_camera_features.py
 ```
+
+完整 Python 回歸使用 `python3 -m unittest discover -v`；Node 可用的本機環境另執行 `test_camera_mobile.cjs`、`test_camera_pages.cjs`、`test_camera_preview.cjs`、`test_camera_stream.cjs`。Node 不是正式服務執行依賴。
 
 維護測試會在 temporary directory 建立測試資料。它在 Ubuntu 上以管理權限驗證
 設定封存與增量備份，並模擬服務重啟呼叫，不會重啟正式服務。

@@ -24,6 +24,7 @@ from camera_backups import index_files
 from camera_storage import check_backup_budget, reserve_space
 from camera_media import MediaLibrary
 from camera_diagnostics import ingress_check
+from camera_notifications import Notifications
 
 STATE = pathlib.Path("/srv/camera-monitor/data/maintenance")
 BACKUPS = pathlib.Path("/srv/camera-monitor/backups/snapshots")
@@ -52,7 +53,7 @@ def health(repair=False):
     previous = read_json(STATE / "status.json", {})
     result = {"checked_at": datetime.now(timezone.utc).isoformat(), "services": {}}
     for name, port in [("camera-ai", 8092), ("camera-recorder-api", 8091), ("camera-timestamp", 8093),
-                       ("camera-audio", 8094), ('camera-backup-api',8095)]:
+                       ("camera-audio", 8094), ('camera-backup-api',8095), ('camera-stream',8096)]:
         try:
             state = http_json(f"http://127.0.0.1:{port}/health")
             healthy = bool(state.get("healthy"))
@@ -107,6 +108,7 @@ def health(repair=False):
         with path.open('a') as stream:
             stream.write(json.dumps({'at':result['checked_at'],**result['changes']})+'\n')
     atomic_json(STATE / "status.json", result)
+    Notifications(STATE).observe(issues)
     return result
 
 
@@ -179,12 +181,13 @@ def backup(dry_run=False, progress=None):
                 (pins / "recorder-state").mkdir()
                 pin_file(settings, pins / "recorder-state" / "settings.json")
             policy = STATE / "storage-policy.json"
-            preferences = STATE / 'event-preferences.sqlite3'
-            if preferences.is_file() and not preferences.is_symlink():
-                (pins / 'maintenance-state').mkdir(exist_ok=True)
-                with closing(sqlite3.connect(f'file:{preferences}?mode=ro', uri=True)) as source_db:
-                    with closing(sqlite3.connect(pins / 'maintenance-state' / 'event-preferences.sqlite3')) as backup_db:
-                        source_db.backup(backup_db)
+            for filename in ('event-preferences.sqlite3','notifications.sqlite3'):
+                preferences = STATE / filename
+                if preferences.is_file() and not preferences.is_symlink():
+                    (pins / 'maintenance-state').mkdir(exist_ok=True)
+                    with closing(sqlite3.connect(f'file:{preferences}?mode=ro', uri=True)) as source_db:
+                        with closing(sqlite3.connect(pins / 'maintenance-state' / filename)) as backup_db:
+                            source_db.backup(backup_db)
             if policy.is_file() and not policy.is_symlink():
                 (pins / "maintenance-state").mkdir(exist_ok=True)
                 pin_file(policy, pins / "maintenance-state" / "storage-policy.json")

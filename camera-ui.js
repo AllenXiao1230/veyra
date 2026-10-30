@@ -1,6 +1,7 @@
 "use strict";
 (() => {
   const paths = {
+    bell: '<path d="M5 17h14l-2-3V9a5 5 0 0 0-10 0v5l-2 3Z"/><path d="M10 21h4"/>',
     camera: '<path d="M15 7h4a2 2 0 0 1 2 2v9H3V9a2 2 0 0 1 2-2h2l2-3h4l2 3Z"/><circle cx="12" cy="12" r="3"/>',
     settings: '<path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/><path d="m9 3-1 3-3 1 1 3-2 2 2 2-1 3 3 1 1 3h6l1-3 3-1-1-3 2-2-2-2 1-3-3-1-1-3Z"/>',
     trash: '<path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/>',
@@ -25,9 +26,11 @@
   const page = document.body.dataset.page;
   $('mediaDate')?.setAttribute('aria-label','日期');
   document.querySelectorAll('.view-switch a').forEach(link => {
-    if (new URL(link.href).search === location.search) link.setAttribute('aria-current','page');
+    const target = new URL(link.href);
+    const current = new URL(location.href);
+    if (target.pathname === current.pathname && target.searchParams.get('view') === current.searchParams.get('view')) link.setAttribute('aria-current','page');
   });
-  $("appHeader").innerHTML = `<div class="header-inner"><a class="brand" href="/">${icon("camera")}<span>Camera Monitor</span></a><nav class="main-nav" aria-label="主要導覽"><a href="/" ${page === "live" ? 'aria-current="page"' : ""}>即時監看</a><a href="/snapshots.html" ${page === "snapshots" ? 'aria-current="page"' : ""}>快照</a><a href="/recordings.html" ${page === "recordings" ? 'aria-current="page"' : ""}>錄影</a></nav><button class="header-settings quiet" id="openSettings" type="button">${icon("settings")}<span>設定</span></button></div>`;
+  $("appHeader").innerHTML = `<div class="header-inner"><a class="brand" href="/">${icon("camera")}<span>Camera Monitor</span></a><nav class="main-nav" aria-label="主要導覽"><a href="/" ${page === "live" ? 'aria-current="page"' : ""}>即時監看</a><a href="/snapshots.html" ${page === "snapshots" ? 'aria-current="page"' : ""}>快照</a><a href="/recordings.html" ${page === "recordings" ? 'aria-current="page"' : ""}>錄影</a></nav><button class="header-settings quiet" id="openSettings" type="button" aria-label="設定">${icon("settings")}<span>設定</span></button></div>`;
   document.querySelectorAll("[data-icon]").forEach(el => { el.innerHTML = icon(el.dataset.icon); });
 
   const readers = new Set();
@@ -98,7 +101,7 @@
     if (!action) toastTimer = setTimeout(() => { toastNode.hidden = true; }, 7000);
   }
 
-  let preferences = {fit: "contain", reconnect: true, bandwidth: "auto"};
+  let preferences = {fit: "contain", reconnect: true, bandwidth: "auto", stream:"auto"};
   try { preferences = {...preferences, ...JSON.parse(localStorage.getItem("camera.preferences") || "{}")}; } catch (_) {}
   function refreshPreferences() {
     try { preferences={...preferences,...JSON.parse(localStorage.getItem('camera.preferences')||'{}')}; } catch (_) {}
@@ -110,6 +113,7 @@
   let settingsMotionBaseline = null;
   let settingsGeneration = 0;
   let settingsBackupBaseline = null;
+  let settingsNotificationBaseline = null;
   const settingsErrors = new Map();
   let polling = false;
   const settings = element("dialog");
@@ -130,6 +134,8 @@
   backdrop(settings);
   $("settingFit").closest("section").insertAdjacentHTML("beforeend", '<div class="setting-row"><label for="settingBandwidth">預覽頻寬</label><select id="settingBandwidth"><option value="auto">自動（手機省流量）</option><option value="standard">標準</option><option value="low">低頻寬</option></select></div><p class="settings-status">低頻寬使用 640px、約每秒 2 張影格；錄影畫質不變。</p>');
   $("settingReserve").step = "1";
+  $('settingFit').closest('section').insertAdjacentHTML('beforeend','<div class="setting-row"><label for="settingStream">即時串流</label><select id="settingStream"><option value="auto">自動（手機省流量）</option><option value="integrated">音畫整合（低延遲）</option><option value="hls">音畫整合（穩定優先）</option><option value="images">影格備援</option></select></div>');
+  settings.querySelector('.dialog-body').insertAdjacentHTML('beforeend','<section class="settings-section"><h3>站內通知</h3><div class="setting-row"><label for="settingNotices">故障通知</label><input id="settingNotices" type="checkbox" disabled></div><div class="setting-row"><label for="settingRecoveries">恢復通知</label><input id="settingRecoveries" type="checkbox" disabled></div><div class="setting-row"><label for="settingNoticeCooldown">相同故障冷卻</label><select id="settingNoticeCooldown" disabled><option value="60">1 分鐘</option><option value="300">5 分鐘</option><option value="900">15 分鐘</option><option value="3600">60 分鐘</option></select></div></section>');
   settings.addEventListener("close", () => { settingsGeneration++; });
   function sourceLabel(source) {
     const description = source?.description || source?.name || "麥克風";
@@ -182,8 +188,10 @@
     $("settingVolume").disabled = true;
     $("settingMuted").disabled = true;
     settingsErrors.clear();
+    settingsNotificationBaseline=null;
+    for(const id of ['settingNotices','settingRecoveries','settingNoticeCooldown'])$(id).disabled=true;
     showSettingsError("");
-    const results = await Promise.allSettled([api("/audio-api/status"), api("/recordings-api/status"), api("/backups-api/policy")]);
+    const results = await Promise.allSettled([api("/audio-api/status"), api("/recordings-api/status"), api("/backups-api/policy"),api('/backups-api/notifications/policy')]);
     if (generation !== settingsGeneration || !settings.open) return;
     if (results[0].status === "fulfilled") {
       lastAudio = results[0].value;
@@ -209,12 +217,20 @@
       $("settingBackupQuota").value = settingsBackupBaseline;
       $("settingBackupQuota").disabled = false;
     } else showSettingsError("無法讀取備份容量設定，請稍後重新開啟設定。", "loadBackup");
+    if(results[3].status==='fulfilled'){
+      const policy=results[3].value;settingsNotificationBaseline={enabled:policy.enabled,recoveries:policy.recoveries,cooldown:policy.cooldown};
+      $('settingNotices').checked=policy.enabled;$('settingRecoveries').checked=policy.recoveries;
+      if(![...$('settingNoticeCooldown').options].some(o=>o.value===String(policy.cooldown))){const option=element('option','',policy.cooldown+' 秒');option.value=String(policy.cooldown);$('settingNoticeCooldown').append(option);}
+      $('settingNoticeCooldown').value=String(policy.cooldown);
+      for(const id of ['settingNotices','settingRecoveries','settingNoticeCooldown'])$(id).disabled=false;
+    }else showSettingsError('通知設定讀取失敗，請重新開啟設定。','loadNotifications');
     $("saveSettings").disabled = false;
   }
   $("openSettings").addEventListener("click", () => {
     $("settingFit").value = preferences.fit;
     $("settingReconnect").checked = preferences.reconnect;
     $("settingBandwidth").value = preferences.bandwidth;
+    $('settingStream').value=preferences.stream||'auto';
     settings.showModal();
     loadSettings();
   });
@@ -267,7 +283,12 @@
         try { await api("/backups-api/policy", {max_backup_gb: backupQuota}); settingsBackupBaseline = backupQuota; showSettingsError("", "saveBackup"); }
         catch (error) { showSettingsError("備份：" + error.message, "saveBackup"); }
       } else if (settingsBackupBaseline !== null) showSettingsError("", "saveBackup");
-      preferences = {fit: $("settingFit").value, reconnect: $("settingReconnect").checked, bandwidth: $("settingBandwidth").value};
+      const notificationPolicy={enabled:$('settingNotices').checked,recoveries:$('settingRecoveries').checked,cooldown:Number($('settingNoticeCooldown').value)};
+      if(settingsNotificationBaseline&&JSON.stringify(notificationPolicy)!==JSON.stringify(settingsNotificationBaseline)){
+        try{await api('/backups-api/notifications/policy',notificationPolicy);settingsNotificationBaseline=notificationPolicy;showSettingsError('','saveNotifications');}
+        catch(error){showSettingsError('通知：'+error.message,'saveNotifications');}
+      }else if(settingsNotificationBaseline)showSettingsError('','saveNotifications');
+      preferences = {fit: $("settingFit").value, reconnect: $("settingReconnect").checked, bandwidth: $("settingBandwidth").value,stream:$('settingStream').value};
       try { localStorage.setItem("camera.preferences", JSON.stringify(preferences)); } catch (_) {}
       window.dispatchEvent(new CustomEvent("camera-preferences", {detail: preferences}));
       if (settingsErrors.size) { poll(); return; }

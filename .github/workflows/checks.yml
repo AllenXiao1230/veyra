@@ -8,10 +8,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install test dependencies
-        run: sudo apt-get update && sudo apt-get install -y python3-opencv python3-numpy ffmpeg rsync
+        run: sudo apt-get update && sudo apt-get install -y python3-opencv python3-numpy python3-yaml ffmpeg rsync
       - name: Python regression tests
         run: /usr/bin/python3 -m unittest discover -v
       - name: JavaScript syntax
         run: for file in *.js; do node --check "$file"; done
       - name: Preview connection regression
-        run: node test_camera_preview.cjs && node test_camera_mobile.cjs && node test_camera_pages.cjs
+        run: node test_camera_preview.cjs && node test_camera_mobile.cjs && node test_camera_pages.cjs && node test_camera_stream.cjs

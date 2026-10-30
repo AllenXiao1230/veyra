@@ -15,6 +15,17 @@
     const option = ui.element('option','',label); option.value = value; type.append(option);
   }
   $('mediaDate').parentElement.append(type);
+  const initialParams=new URLSearchParams(location.search);let initialDate=initialParams.get('date')||'';
+  if(['person','motion','unknown'].includes(initialParams.get('type')))type.value=initialParams.get('type');
+  favoriteFilter.setAttribute('aria-pressed',String(initialParams.get('favorite')==='1'));
+  const advanced=ui.element('details','advanced-search');
+  advanced.innerHTML='<summary>進階查找<span id="advancedSummary" class="muted"></span></summary><form id="eventSearchForm"><div class="advanced-fields"><label>開始時間（台北）<input id="eventFrom" type="datetime-local"></label><label>結束時間（含所選分鐘）<input id="eventUntil" type="datetime-local"></label><label>關鍵字<input id="eventQuery" type="search" maxlength="100" placeholder="事件編號、檔名、標籤或備註"></label><label>精確標籤<input id="eventTag" type="search" maxlength="24"></label><label>媒體<select id="eventMedia"><option value="all">全部媒體狀態</option><option value="snapshot">有快照</option><option value="video">有可播放錄影</option><option value="missing">沒有快照</option></select></label><label>最低 AI 信心（%）<input id="eventConfidence" type="number" min="0" max="100" step="1"></label><label>排序<select id="eventSort"><option value="newest">最新優先</option><option value="oldest">最舊優先</option></select></label></div><div class="search-actions"><button class="primary" type="submit">套用條件</button><button id="clearEventSearch" type="button">清除進階條件</button></div></form>';
+  document.querySelector('.library-toolbar').after(advanced);
+  const advancedFields={from:'eventFrom',until:'eventUntil',q:'eventQuery',tag:'eventTag',media:'eventMedia',confidence:'eventConfidence',sort:'eventSort'};
+  let applied={};
+  for(const [key,id] of Object.entries(advancedFields)){const value=initialParams.get(key);if(value!==null){$(id).value=value;applied[key]=value;advanced.open=true;}}
+  $('eventSearchForm').addEventListener('submit',event=>{event.preventDefault();applied=Object.fromEntries(Object.entries(advancedFields).map(([key,id])=>[key,$(id).value]));load();});
+  $('clearEventSearch').addEventListener('click',()=>{$('eventSearchForm').reset();applied={};load();});
   $('selectToggle').before(favoriteFilter);
   const bookmark = ui.element('button','','收藏選取'), exportSelected = ui.element('button','','匯出選取');
   bookmark.type = exportSelected.type = 'button'; $('selectionBar').append(bookmark,exportSelected);
@@ -25,9 +36,25 @@
   const preview = ui.element('dialog','preview-dialog'); preview.setAttribute('aria-labelledby','eventPreviewTitle');
   preview.innerHTML = `<div class="dialog-heading"><h2 id="eventPreviewTitle">事件</h2><button type="button" class="icon-button quiet" aria-label="關閉事件預覽">${ui.icon('close')}</button></div><div class="preview-content"></div><div class="dialog-footer"><a class="button" download>下載原檔</a></div>`;
   document.body.append(preview); ui.backdrop(preview);
+  const notes=ui.element('form','event-notes');
+  notes.innerHTML='<label>標籤（以逗號分隔，最多 10 個）<input id="eventNoteTags" maxlength="250"></label><label>備註<textarea id="eventNoteText" maxlength="1000" rows="3"></textarea></label><div class="search-actions"><button type="submit">儲存標籤與備註</button><p id="eventNoteStatus" role="status" class="muted"></p></div>';
+  preview.querySelector('.dialog-footer').before(notes);let editingRow=null,noteGeneration=0;
+  notes.addEventListener('submit',async event=>{
+    event.preventDefault();if(!editingRow)return;const row=editingRow,own=noteGeneration,save=notes.querySelector('button');save.disabled=true;
+    $('eventNoteStatus').textContent='儲存中…';
+    try{
+      const result=await ui.api('/events-api/annotate',{id:row.id,note:$('eventNoteText').value,tags:$('eventNoteTags').value.split(/[,，]/).map(t=>t.trim()).filter(Boolean)});
+      row.note=result.note;row.tags=result.tags;
+      if(own===noteGeneration&&preview.open){$('eventNoteStatus').textContent='已儲存';render();}
+    }catch(error){if(own===noteGeneration){$('eventNoteStatus').textContent=error.message;$('eventNoteStatus').setAttribute('role','alert');}}
+    finally{if(own===noteGeneration)save.disabled=false;}
+  });
   const release = () => { const video = preview.querySelector('video'); if(video) {video.pause();video.removeAttribute('src');video.load();} preview.querySelector('.preview-content').replaceChildren(); };
   preview.querySelector('button').addEventListener('click',()=>preview.close()); preview.addEventListener('close',release);
   function open(row, video) {
+    editingRow=row;noteGeneration++;notes.querySelector('button').disabled=false;
+    $('eventNoteTags').value=(row.tags||[]).join(', ');$('eventNoteText').value=row.note||'';
+    $('eventNoteStatus').textContent='';$('eventNoteStatus').setAttribute('role','status');
     release(); $('eventPreviewTitle').textContent = ui.dateTime(row.created_at);
     const media = document.createElement(video ? 'video' : 'img');
     media.src = video ? video.playback_url : row.snapshot_url;
@@ -78,6 +105,8 @@
       }
       if(!row.recordings.length) links.append(ui.element('span','muted','無相關錄影'));
       copy.append(links);
+      if(row.tags?.length){const tags=ui.element('div','event-tags');for(const tag of row.tags)tags.append(ui.element('span','',tag));copy.append(tags);}
+      if(row.note)copy.append(ui.element('p','muted',row.note.length>140?row.note.slice(0,140)+'…':row.note));
       const actions = ui.element('div','event-actions');
       const star = ui.button(row.favorite ? '取消收藏事件 ' + ui.time(row.created_at) : '收藏事件 ' + ui.time(row.created_at),'star');
       star.setAttribute('aria-pressed',String(row.favorite));star.addEventListener('click',()=>favorite([row.id],!row.favorite));
@@ -96,13 +125,17 @@
     previous.disabled=$('loadMore').disabled=true;
     try {
       const params = new URLSearchParams({limit:window.matchMedia('(max-width:600px)').matches?'12':'24',type:type.value});
-      if(cursor)params.set('before',cursor);if($('mediaDate').value)params.set('date',$('mediaDate').value);
+      if(cursor)params.set('before',cursor);if($('mediaDate').value||initialDate)params.set('date',$('mediaDate').value||initialDate);
+      for(const [key,value] of Object.entries(applied))if(value&&value!=='all'&&value!=='newest')params.set(key,value);
       if(favoriteFilter.getAttribute('aria-pressed')==='true')params.set('favorite','1');
+      const activeCount=Object.values(applied).filter(v=>v&&v!=='all'&&v!=='newest').length;$('advancedSummary').textContent=activeCount?' · '+activeCount+' 項條件':'';
+      if(direction==='reset'&&window.history?.replaceState){const share=new URLSearchParams(params);share.delete('limit');share.delete('before');share.set('view','events');window.history.replaceState(null,'','/snapshots.html?'+share);}
       const result=await ui.api('/events-api/list?'+params,undefined,15000,request.signal);
       if(current!==generation||pageGone||document.hidden)return;rows=result.items;next=result.next_before;
-      const date=$('mediaDate').value;$('mediaDate').replaceChildren(ui.element('option','','全部日期'));
+      const date=$('mediaDate').value||initialDate;initialDate='';$('mediaDate').replaceChildren(ui.element('option','','全部日期'));
       $('mediaDate').firstElementChild.value='';
       for(const day of result.dates) {const option=ui.element('option','',day.date.replaceAll('-','/')+` · ${day.count} 件`);option.value=day.date;$('mediaDate').append(option);}
+      if(date&&!result.dates.some(day=>day.date===date)){const option=ui.element('option','',date.replaceAll('-','/')+' · 0 件');option.value=date;$('mediaDate').append(option);}
       $('mediaDate').value=date;$('libraryCount').textContent=`${result.total} 件`;
       $('loadedCount').textContent=`本頁 ${rows.length} / 共 ${result.total} 件`;render();
       if(direction==='next'||direction==='previous')$('libraryContent').scrollIntoView({block:'start',behavior:'auto'});
@@ -146,7 +179,7 @@
     try {const result=await ui.api('/events-api/export',{ids:exportIds,format:$('eventExportFormat').value,include_videos:$('eventExportVideos').checked});jobId=result.job.id;jobFailures=0;try{sessionStorage.setItem('camera.export',jobId);}catch(_){}dialog.close();clearTimeout(jobTimer);jobStatus();}
     catch(error){exportError.hidden=false;exportError.textContent=error.message;}finally{button.disabled=false;}
   });
-  $('mediaDate').addEventListener('change',()=>load());type.addEventListener('change',()=>load());
+  $('mediaDate').addEventListener('change',()=>{initialDate='';load();});type.addEventListener('change',()=>load());
   favoriteFilter.addEventListener('click',()=>{favoriteFilter.setAttribute('aria-pressed',String(favoriteFilter.getAttribute('aria-pressed')!=='true'));load();});
   $('libraryRefresh').addEventListener('click',()=>load());$('loadMore').addEventListener('click',()=>load('next'));previous.addEventListener('click',()=>load('previous'));
   $('selectToggle').addEventListener('click',()=>{selecting=!selecting;selected.clear();selection();});

@@ -11,7 +11,7 @@ import sys
 
 def inspect(stage=None,manifest=None):
     result={'python':sys.version.split()[0], 'platform':sys.platform,
-            'modules':{name:importlib.util.find_spec(name) is not None for name in ('cv2','numpy')},
+            'modules':{name:importlib.util.find_spec(name) is not None for name in ('cv2','numpy','yaml')},
             'commands':{name:bool(shutil.which(name)) for name in ('ffmpeg','ffprobe','rsync','nginx','systemctl')},
             'hardware_encoder':Path('/dev/dri/renderD128').exists(),
             'runtime_lock':Path('/run/camera-monitor/media.lock').is_file()}

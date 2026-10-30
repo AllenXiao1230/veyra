@@ -16,7 +16,7 @@ async function test(file,search) {
       showModal(){this.open=true;},close(){this.open=false;this.listeners.close?.();}};
   }
   const get=id=>{if(!registry.has(id))registry.set(id,node());return registry.get(id);};
-  const document={hidden:false,body:node(),getElementById:get,createElement:node,querySelectorAll:()=>[],addEventListener:(type,fn)=>documentEvents[type]=fn};
+  const document={hidden:false,body:node(),getElementById:get,createElement:node,querySelector:selector=>get(selector),querySelectorAll:()=>[],addEventListener:(type,fn)=>documentEvents[type]=fn};
   document.body.dataset.page='snapshots';
   const ui={element:(tag,cls,text)=>{const value=Object.assign(node(tag),{className:cls,textContent:text||''});made.push(value);return value;},
     button:(label)=>{const value=node('button');value.label=label;made.push(value);return value;},

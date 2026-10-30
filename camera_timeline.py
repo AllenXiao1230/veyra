@@ -23,6 +23,10 @@ TAIPEI = timezone(timedelta(hours=8))
 VIDEO = re.compile(r'recording-\d{8}-\d{6}(?:-[0-9a-f]{12})?\.(mp4|mkv)')
 
 
+class ExportCancelled(Exception):
+    pass
+
+
 class Timeline:
     def __init__(self, data, videos, state):
         self.data, self.videos, self.state = map(Path, (data, videos, state))
@@ -31,6 +35,7 @@ class Timeline:
         self.exports = self.state / 'event-exports'
         self.exports.mkdir(exist_ok=True)
         self.lock, self.export_lock = threading.RLock(), threading.Lock()
+        self.cancellations = {}
         self.synced_at = 0
         self.date_cache = {}
         with closing(self.prefs()) as db, db:
@@ -39,6 +44,7 @@ class Timeline:
               CREATE TABLE IF NOT EXISTS links(event_id INTEGER, filename TEXT, session_id TEXT, complete INTEGER,
               PRIMARY KEY(event_id, filename)); CREATE INDEX IF NOT EXISTS links_event ON links(event_id);''')
             db.execute('CREATE TABLE IF NOT EXISTS link_states(event_id INTEGER,filename TEXT,state TEXT,PRIMARY KEY(event_id,filename))')
+            db.execute("CREATE TABLE IF NOT EXISTS event_details(event_id INTEGER PRIMARY KEY,note TEXT NOT NULL DEFAULT '',tags TEXT NOT NULL DEFAULT '[]',updated_at REAL NOT NULL)")
         for path in self.exports.glob('*.job.json'):
             try:
                 job = json.loads(path.read_text())
@@ -49,7 +55,7 @@ class Timeline:
                 except OSError: pass
                 continue
             if job.get('state') in ('queued', 'running'):
-                job.update(state='interrupted', error='服務曾重新啟動，請重新匯出')
+                job.update(state='cancelled' if job.get('cancel_requested') else 'interrupted', error='服務曾重新啟動，請重新匯出')
                 atomic_json(path, job)
 
     def prefs(self):
@@ -65,9 +71,9 @@ class Timeline:
                               if 'metadata_json' in columns else "CASE WHEN e.person_detected=1 THEN 'person' ELSE 'unknown' END")
         return db
 
-    def sync_links(self):
+    def sync_links(self, force=False):
         with self.lock:
-            if time.monotonic() - self.synced_at < 5:
+            if not force and time.monotonic() - self.synced_at < 5:
                 return
             with closing(self.prefs()) as db, db:
                 for path in (self.videos / 'sessions').glob('*.json'):
@@ -109,13 +115,15 @@ class Timeline:
             for row in rows:
                 item = dict(row)
                 name = item.pop('snapshot_name')
-                snapshot = self.data / 'snapshots' / name
+                snapshot = self.data / 'snapshots' / (name or '')
                 valid = bool(name and Path(name).name == name and '\\' not in name and
                              Path(name).suffix.lower() in ('.jpg','.jpeg','.png') and
                              not (self.data / 'snapshots').is_symlink() and not snapshot.is_symlink() and snapshot.is_file())
                 item.update(favorite=bool(item.get('favorite')), date=(datetime.fromisoformat(item['created_at']).astimezone(TAIPEI).date().isoformat()),
                             snapshot_name=name if valid else None,
                             snapshot_url='/ai-api/snapshots/' + quote(name) if valid else None, recordings=[])
+                detail=db.execute('SELECT note,tags FROM event_details WHERE event_id=?',(item['id'],)).fetchone()
+                item.update(note=detail[0] if detail else '',tags=json.loads(detail[1]) if detail else [])
                 for filename, complete, state in db.execute("SELECT l.filename,l.complete,coalesce(s.state,CASE WHEN l.complete=1 THEN 'complete' ELSE 'recording' END) FROM links l LEFT JOIN link_states s ON s.event_id=l.event_id AND s.filename=l.filename WHERE l.event_id=? ORDER BY l.filename", (item['id'],)):
                     video = self.videos / filename
                     if not video.is_symlink() and video.is_file():
@@ -126,47 +134,96 @@ class Timeline:
         return result
 
     def list(self, query=''):
-        params = parse_qs(query)
-        limit = int(params.get('limit', ['24'])[0])
-        before = int(params.get('before', ['0'])[0])
-        if not 1 <= limit <= 100 or before < 0:
-            raise ValueError('分頁範圍不正確')
-        where, values = [], []
-        if params.get('favorite', ['0'])[0] == '1':
-            where.append('p.favorite=1')
-        kind = params.get('type', ['all'])[0]
-        if kind not in ('all', 'person', 'motion', 'unknown'):
-            raise ValueError('事件分類不正確')
-        join = ' FROM events e LEFT JOIN prefs.favorites p ON p.event_id=e.id'
+        params=parse_qs(query)
+        value=lambda key,default='':params.get(key,[default])[0]
+        limit=int(value('limit','24')); before=int(value('before','0'))
+        if not 1<=limit<=100 or before<0:raise ValueError('分頁範圍不正確')
+        kind=value('type','all'); order=value('sort','newest'); media=value('media','all')
+        if kind not in ('all','person','motion','unknown') or order not in ('newest','oldest') or media not in ('all','snapshot','video','missing'):
+            raise ValueError('事件篩選不正確')
+        query_text=value('q').strip(); tag=value('tag').strip()
+        if len(query_text)>100 or len(tag)>24:raise ValueError('搜尋內容太長')
+        where=[]; values=[]
+        if value('favorite')=='1':where.append('p.favorite=1')
+        join=' FROM events e LEFT JOIN prefs.favorites p ON p.event_id=e.id LEFT JOIN prefs.event_details d ON d.event_id=e.id'
         with closing(self.events()) as db:
-            if kind != 'all':
-                if kind=='unknown':where.append(self.ai_expression + " IN ('unknown','pending')")
-                else:where.append(self.ai_expression + '=?'); values.append(kind)
-            base = ' AND '.join(where) or '1'
-            signature = tuple((p.stat().st_mtime_ns, p.stat().st_size) if p.exists() else None for p in
-                              (self.data/'events.sqlite3',self.data/'events.sqlite3-wal',self.preferences))
-            key = (base,tuple(values),signature)
-            cached = self.date_cache.get(key)
-            if cached and time.monotonic() - cached[0] < 30:
-                dates = cached[1]
+            if kind!='all':
+                if kind=='unknown':where.append(self.ai_expression+" IN ('unknown','pending')")
+                else:where.append(self.ai_expression+'=?');values.append(kind)
+            if query_text:
+                escaped=query_text.replace('!','!!').replace('%','!%').replace('_','!_')
+                where.append("(CAST(e.id AS TEXT)=? OR coalesce(e.snapshot_name,'') LIKE ? ESCAPE '!' OR coalesce(d.note,'') LIKE ? ESCAPE '!' OR coalesce(d.tags,'') LIKE ? ESCAPE '!')")
+                values += [query_text]+['%'+escaped+'%']*3
+            if tag:
+                where.append("EXISTS(SELECT 1 FROM json_each(coalesce(d.tags,'[]')) WHERE value=? COLLATE NOCASE)");values.append(tag)
+            if value('confidence'):
+                confidence=float(value('confidence'))
+                if not 0<=confidence<=100:raise ValueError('AI 信心值須為 0–100')
+                where.append('e.confidence>=?');values.append(confidence/100)
+            start=end=None
+            for key in ('from','until'):
+                raw=value(key)
+                if not raw:continue
+                try:
+                    moment=datetime.fromisoformat(raw)
+                    if moment.tzinfo is None:moment=moment.replace(tzinfo=TAIPEI)
+                    moment=moment.astimezone(timezone.utc)
+                except (ValueError,OverflowError):raise ValueError('時間範圍不正確')
+                if key=='from':start=moment;where.append('e.created_at>=?')
+                else:
+                    # datetime-local minute fields include the chosen end minute.
+                    if len(raw)==16:moment+=timedelta(minutes=1)
+                    end=moment;where.append('e.created_at<?')
+                values.append(moment.isoformat())
+            if start and end and start>=end:raise ValueError('結束時間須晚於開始時間')
+            if media!='all':
+                self.sync_links(force=True)
+                presence={}
+                def exists(kind,name):
+                    key=(kind,name)
+                    if key not in presence:
+                        root=self.data/'snapshots' if kind=='snapshot' else self.videos
+                        valid=isinstance(name,str) and name==Path(name).name and '/' not in name and chr(92) not in name
+                        path=root/(name or '') if valid else root
+                        presence[key]=bool(valid and not path.is_symlink() and path.is_file())
+                    return int(presence[key])
+                db.create_function('snapshot_exists',1,lambda name:exists('snapshot',name))
+                db.create_function('video_exists',1,lambda name:exists('video',name))
+                if media=='snapshot':where.append('snapshot_exists(e.snapshot_name)=1')
+                elif media=='missing':where.append('snapshot_exists(e.snapshot_name)=0')
+                else:where.append('EXISTS(SELECT 1 FROM prefs.links l WHERE l.event_id=e.id AND l.complete=1 AND video_exists(l.filename)=1)')
+            base=' AND '.join(where) or '1'
+            # Actual media existence cannot use a metadata-only result cache.
+            signature=tuple((p.stat().st_mtime_ns,p.stat().st_size) if p.exists() else None for p in
+                            (self.data/'events.sqlite3',self.data/'events.sqlite3-wal',self.preferences))
+            key=(base,tuple(values),signature)
+            cached=self.date_cache.get(key) if media=='all' else None
+            if cached and time.monotonic()-cached[0]<30:dates=cached[1]
             else:
-                dates = [{'date': r[0], 'count': r[1]} for r in db.execute(
-                    "SELECT date(e.created_at,'+8 hours'),count(*)" + join + ' WHERE ' + base + ' GROUP BY 1 ORDER BY 1 DESC', values)]
-                if len(self.date_cache) > 16: self.date_cache.clear()
-                self.date_cache[key] = (time.monotonic(), dates)
-            date = params.get('date', [''])[0]
+                dates=[{'date':r[0],'count':r[1]} for r in db.execute("SELECT date(e.created_at,'+8 hours'),count(*)"+join+' WHERE '+base+' GROUP BY 1 ORDER BY 1 DESC',values)]
+                if len(self.date_cache)>16:self.date_cache.clear()
+                if media=='all':self.date_cache[key]=(time.monotonic(),dates)
+            date=value('date')
             if date:
-                start = datetime.strptime(date, '%Y-%m-%d').replace(tzinfo=TAIPEI).astimezone(timezone.utc)
-                where.append('e.created_at>=? AND e.created_at<?')
-                values += [start.isoformat(), (start + timedelta(days=1)).isoformat()]
-            filtered = ' AND '.join(where) or '1'
-            total = sum(r['count'] for r in dates if not date or r['date'] == date)
-            if before:
-                where.append('e.id<?'); values.append(before)
-            rows = db.execute('SELECT e.id,e.created_at,e.event_type,e.person_detected,e.confidence,e.snapshot_name,coalesce(p.favorite,0) favorite,'+self.ai_expression+' ai_status'
-                + join + ' WHERE ' + (' AND '.join(where) or '1') + ' ORDER BY e.id DESC LIMIT ?', values + [limit + 1]).fetchall()
-        return {'items': self.decorate(rows[:limit]), 'dates': dates, 'total': total,
-                'next_before': str(rows[limit - 1]['id']) if len(rows) > limit else None}
+                day=datetime.strptime(date,'%Y-%m-%d').replace(tzinfo=TAIPEI).astimezone(timezone.utc)
+                where.append('e.created_at>=? AND e.created_at<?');values += [day.isoformat(),(day+timedelta(days=1)).isoformat()]
+            total=sum(r['count'] for r in dates if not date or r['date']==date)
+            if before:where.append('e.id'+('>?' if order=='oldest' else '<?'));values.append(before)
+            rows=db.execute('SELECT e.id,e.created_at,e.event_type,e.person_detected,e.confidence,e.snapshot_name,coalesce(p.favorite,0) favorite,'+self.ai_expression+' ai_status'+join+
+                ' WHERE '+(' AND '.join(where) or '1')+' ORDER BY e.id '+('ASC' if order=='oldest' else 'DESC')+' LIMIT ?',values+[limit+1]).fetchall()
+        return {'items':self.decorate(rows[:limit]),'dates':dates,'total':total,
+                'next_before':str(rows[limit-1]['id']) if len(rows)>limit else None}
+
+    def annotate(self,event_id,note,tags):
+        if type(event_id) is not int or not isinstance(note,str) or len(note)>1000 or not isinstance(tags,list) or len(tags)>10:
+            raise ValueError('備註最多 1000 字、標籤最多 10 個')
+        if any(not isinstance(t,str) or not t.strip() or len(t.strip())>24 or any(ord(c)<32 for c in t) for t in tags):
+            raise ValueError('每個標籤須為 1–24 字')
+        self.selected([event_id]);tags=list(dict.fromkeys(t.strip() for t in tags))
+        with self.lock,media_guard(self.data),closing(self.prefs()) as db,db:
+            db.execute('INSERT OR REPLACE INTO event_details VALUES(?,?,?,?)',(event_id,note.strip(),json.dumps(tags,ensure_ascii=False),time.time()))
+        self.date_cache.clear()
+        return {'ok':True,'note':note.strip(),'tags':tags}
 
     def selected(self, ids):
         if not isinstance(ids, list) or not 1 <= len(ids) <= 100 or any(type(i) is not int or i <= 0 for i in ids):
@@ -216,7 +273,9 @@ class Timeline:
                 if job.get('expires_at',0) >= now: continue
                 for suffix in ('zip','csv','json','tmp'):
                     (self.exports/(token+'.data.'+suffix)).unlink(missing_ok=True)
-                old.unlink(missing_ok=True); removed += 1
+                if now>job['expires_at']+7*86400:old.unlink(missing_ok=True)
+                elif job.get('state')=='complete':job.update(state='expired');atomic_json(old,job)
+                removed += 1
             for temporary in self.exports.glob('*.data.tmp'):
                 if temporary.stat().st_mtime < now-3600:
                     temporary.unlink(missing_ok=True)
@@ -231,6 +290,16 @@ class Timeline:
         finally:
             if not locked: self.export_lock.release()
 
+    def cancel(self, token):
+        with self.lock:
+            job=self.job(token)
+            if job.get('state') not in ('queued','running'):
+                raise RuntimeError('工作已結束，無法取消')
+            event=self.cancellations.get(token)
+            if event is None:raise RuntimeError('工作已中斷，請重新整理')
+            event.set();job['cancel_requested']=True;atomic_json(self.exports/(token+'.job.json'),job)
+        return {'ok':True}
+
     def export(self, ids, format='zip', include_videos=False):
         if deployment_active():raise RuntimeError('系統更新中，請稍後再匯出。')
         if format not in ('zip', 'csv', 'json') or type(include_videos) is not bool:
@@ -242,19 +311,32 @@ class Timeline:
             self.export_lock.release()
             raise RuntimeError('系統更新中，請稍後再匯出。')
         token = uuid.uuid4().hex
-        job = {'id': token, 'state': 'queued', 'format': format, 'count': len(rows), 'created_at': time.time(), 'expires_at': time.time() + 86400}
+        job = {'id': token, 'state': 'queued', 'format': format, 'count': len(rows), 'ids':list(dict.fromkeys(ids)),
+               'include_videos':include_videos,'done_bytes':0,'total_bytes':0,
+               'created_at': time.time(), 'expires_at': time.time() + 86400}
+        cancellation=threading.Event()
+        with self.lock:self.cancellations[token]=cancellation
         path = self.exports / (token + '.job.json')
         try:
             with media_guard(self.data):
                 if deployment_active():raise RuntimeError('系統更新中，請稍後再匯出。')
                 atomic_json(path, job)
         except Exception:
+            with self.lock:self.cancellations.pop(token,None)
             self.export_lock.release()
             raise
         def worker():
             target = self.exports / (token + '.data.' + format)
             temporary = target.with_suffix('.tmp')
+            last_save=0
+            def checkpoint(done=None):
+                nonlocal last_save
+                if cancellation.is_set():raise ExportCancelled('匯出已取消')
+                if done is not None:job['done_bytes']=done
+                if time.monotonic()-last_save>0.5:
+                    atomic_json(path,job);last_save=time.monotonic()
             try:
+                checkpoint()
                 job['state'] = 'running'; atomic_json(path, job)
                 # Export copies are reproducible, expire after 24h and share a 4GiB budget.
                 self.cleanup_exports(locked=True)
@@ -283,11 +365,15 @@ class Timeline:
                     if estimate > 2 * 1024 ** 3 or used + estimate > 4 * 1024 ** 3 or shutil.disk_usage(self.exports).free < estimate + 1024 ** 3:
                         raise RuntimeError('匯出空間不足或超過 2GiB，請減少選取事件或取消影片')
                     stack.enter_context(reserve_space(self.state,self.exports,estimate))
+                    job['total_bytes']=sum(os.fstat(f.fileno()).st_size for f in files.values())
                     for row in rows:
                         row['created_at_local'] = datetime.fromisoformat(row['created_at']).astimezone(TAIPEI).isoformat(timespec='seconds')
                     text = io.StringIO(newline='')
-                    writer = csv.DictWriter(text, fieldnames=['id','created_at_local','event_type','person_detected','confidence','favorite','snapshot_name'], extrasaction='ignore')
-                    writer.writeheader(); writer.writerows(rows)
+                    writer = csv.DictWriter(text, fieldnames=['id','created_at_local','event_type','person_detected','confidence','favorite','snapshot_name','note','tags'], extrasaction='ignore')
+                    def csv_value(value):
+                        if isinstance(value,list):value=', '.join(value)
+                        return "'"+value if isinstance(value,str) and value.lstrip().startswith(('=','+','-','@')) else value
+                    writer.writeheader(); writer.writerows({k:csv_value(row.get(k)) for k in writer.fieldnames} for row in rows)
                     encoded_json = json.dumps({'timezone': 'Asia/Taipei', 'events': rows}, ensure_ascii=False, indent=2).encode()
                     if format == 'zip':
                         manifest = []
@@ -295,20 +381,28 @@ class Timeline:
                             archive.writestr('events.json', encoded_json)
                             archive.writestr('events.csv', b'\xef\xbb\xbf' + text.getvalue().encode())
                             for name, source in files.items():
+                                checkpoint()
                                 before = os.fstat(source.fileno())
                                 digest = hashlib.sha256()
                                 with archive.open(name, 'w', force_zip64=True) as output:
                                     while chunk := source.read(1024 * 1024):
                                         output.write(chunk); digest.update(chunk)
+                                        checkpoint(job['done_bytes']+len(chunk))
                                 after = os.fstat(source.fileno())
                                 if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
                                     raise RuntimeError('來源檔案仍在變動，請完成錄影後重試')
                                 manifest.append({'path': name, 'size': before.st_size, 'sha256': digest.hexdigest()})
                             archive.writestr('manifest.json', json.dumps({'files': manifest, 'note': '未存在的快照及未完成的錄影不包含在封存內；完整事件紀錄保留於 events.json。'}, ensure_ascii=False))
                     else:
-                        temporary.write_bytes(encoded_json if format == 'json' else b'\xef\xbb\xbf' + text.getvalue().encode())
-                os.replace(temporary, target)
-                job.update(state='complete', size=target.stat().st_size, download_url='/events-api/exports/' + token + '/download')
+                        content=encoded_json if format=='json' else b'\xef\xbb\xbf'+text.getvalue().encode()
+                        job['total_bytes']=len(content);temporary.write_bytes(content);checkpoint(len(content))
+                with self.lock:
+                    checkpoint()
+                    os.replace(temporary, target)
+                    job.update(state='complete', size=target.stat().st_size, download_url='/events-api/exports/' + token + '/download')
+                    atomic_json(path,job)
+            except ExportCancelled:
+                job.update(state='cancelled',error='匯出已取消')
             except Exception as error:
                 job.update(state='failed', error=str(error)[-300:])
             finally:
@@ -316,6 +410,7 @@ class Timeline:
                 try:
                     atomic_json(path, job)
                 finally:
+                    with self.lock:self.cancellations.pop(token,None)
                     self.export_lock.release()
         threading.Thread(target=worker, name='event-export', daemon=True).start()
         return {'job': dict(job)}

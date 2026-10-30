@@ -29,6 +29,23 @@
     return mode === "low" || (mode === "auto" && (mobileViewport?.matches || network?.saveData || /(^|-)2g$|3g/.test(network?.effectiveType || ""))) ? "low" : "standard";
   }
   let mode = streamMode();
+  let streamFailed=false,integrationRetry,appliedStream=ui.preferences().stream||'auto';
+  function scheduleIntegrated(){
+    if(integrationRetry||!streamFailed||paused||pageGone||document.hidden||!ui.preferences().reconnect||ui.preferences().stream==='images'||(!['integrated','hls'].includes(ui.preferences().stream)&&streamMode()==='low'))return;
+    integrationRetry=setTimeout(()=>{integrationRetry=null;streamFailed=false;if(!paused&&!pageGone&&!document.hidden)connect();},60000);
+  }
+  const integratedVideo=ui.element?ui.element('video','integrated-video'):null;
+  if(integratedVideo){integratedVideo.hidden=true;integratedVideo.playsInline=true;integratedVideo.muted=true;integratedVideo.setAttribute('aria-label','音畫整合即時串流');image.before(integratedVideo);}
+  const streamWarning=ui.element?ui.element('p','notice'):null;
+  if(streamWarning){streamWarning.hidden=true;streamWarning.setAttribute('role','status');$('liveViewer').after(streamWarning);}
+  const integrated=window.CameraIntegrated&&integratedVideo?new window.CameraIntegrated(integratedVideo,protocol=>{
+    connected=true;imageFailed=false;retries=0;lastChange=Date.now();$('viewerMessage').hidden=true;
+    liveStatus(true,protocol==='webrtc'?'音畫整合 · WebRTC':'音畫整合 · HLS');
+  },()=>{
+    streamFailed=true;wantsAudio=false;frame.removeAttribute('src');listenButton();
+    streamWarning.hidden=false;streamWarning.textContent=ui.preferences().reconnect?'音畫串流暫不可用，已使用影格備援，稍後自動重試。':'音畫串流暫不可用，已使用影格備援；可按重新連線再試。';connect();
+  },()=>{wantsAudio=false;listenButton();ui.toast('請再按開啟監聽，允許播放聲音。');}):null;
+  function wantsIntegrated(){return integrated&&!streamFailed&&ui.preferences().stream!=='images'&&(['integrated','hls'].includes(ui.preferences().stream)||streamMode()!=='low');}
   window.navigator?.connection?.addEventListener?.('change', () => { if(!paused && !pageGone && !document.hidden && mode !== streamMode()) connect(); });
   mobileViewport?.addEventListener?.('change', () => { if(!paused && !pageGone && !document.hidden && mode !== streamMode()) connect(); });
   const canvas = document.createElement("canvas");
@@ -59,6 +76,16 @@
     $("viewerMessage").textContent = "正在連接攝影機…";
     image.style.objectFit = ui.preferences().fit;
     mode = streamMode();
+    appliedStream=ui.preferences().stream||'auto';
+    if(wantsIntegrated()){
+      clearTimeout(integrationRetry);integrationRetry=null;
+      wantsAudio=false;listenButton();
+      pull?.stop();image.removeAttribute('src');image.hidden=true;integratedVideo.hidden=false;frame.removeAttribute('src');
+      streamWarning.hidden=true;integrated.start(appliedStream==='hls');return;
+    }
+    if(integrated?.active){wantsAudio=false;listenButton();}
+    integrated?.stop();if(integratedVideo)integratedVideo.hidden=true;image.hidden=false;
+    scheduleIntegrated();
     if (mode === "low" && pull) {
       pull.start(image, () => {
         lastChange = Date.now(); connected = true; imageFailed = false;
@@ -77,6 +104,7 @@
     connectionTimer = setTimeout(() => { if (!connected) { liveStatus(false, "重新連線中"); scheduleRetry(); } }, 12000);
   }
   image.addEventListener("load", () => {
+    if(integrated?.active)return;
     if (paused) return;
     connected = true;
     imageFailed = false;
@@ -86,12 +114,14 @@
     liveStatus(true, mode === "low" ? "低頻寬 · 即時連線" : "即時連線");
   });
   image.addEventListener("error", () => {
+    if(integrated?.active)return;
     if (mode === "low") return;
     connected = false;
     imageFailed = true;
     if (!paused && !document.hidden) { liveStatus(false, "影像中斷"); scheduleRetry(); }
   });
   $("previewReconnect").addEventListener("click", () => {
+    streamFailed=false;
     paused = false;
     $("previewPause").innerHTML = ui.icon("pause");
     $("previewPause").setAttribute("aria-label", "暫停預覽");
@@ -104,6 +134,8 @@
     $("previewPause").setAttribute("aria-label", paused ? "恢復預覽" : "暫停預覽");
     $("previewPause").title = paused ? "恢復預覽" : "暫停預覽";
     if (paused) {
+      clearTimeout(integrationRetry);integrationRetry=null;
+      integrated?.stop();
       pull?.stop();
       clearTimeout(connectionTimer);
       clearTimeout(retryTimer);
@@ -124,9 +156,12 @@
     } catch (_) { ui.toast("無法開啟全螢幕，請再試一次。"); }
   });
   window.addEventListener("camera-preferences", () => {
+    const using=!!integrated?.active;streamFailed=false;
+    if(integratedVideo)integratedVideo.style.objectFit=ui.preferences().fit;
+    if(!paused&&(using!==!!wantsIntegrated()||appliedStream!==(ui.preferences().stream||'auto'))){connect();return;}
     image.style.objectFit = ui.preferences().fit;
     if (mode !== streamMode() && !paused) { connect(); return; }
-    if (!ui.preferences().reconnect) { clearTimeout(retryTimer); retryTimer = null; }
+    if (!ui.preferences().reconnect) { clearTimeout(retryTimer); retryTimer = null;clearTimeout(integrationRetry);integrationRetry=null; }
     else if (!connected) scheduleRetry();
   });
   function recorderState(state) {
@@ -203,6 +238,11 @@
     await video.play();
   }
   $("listenToggle").addEventListener("click", async () => {
+    if(integrated?.active){
+      try{await integrated.setMuted(wantsAudio);wantsAudio=!wantsAudio;}
+      catch(_){integratedVideo.muted=true;wantsAudio=false;ui.toast('聲音尚未就緒，請稍後再按開啟監聽。');}
+      listenButton();return;
+    }
     if (wantsAudio) {
       const video = audioVideo();
       if (video) { video.muted = true; video.pause(); }
@@ -227,12 +267,18 @@
     const state = event.detail;
     const selected = state.sources.find(s => s.name === state.selected_source);
     $("audioSummary").textContent = state.healthy ? ui.sourceLabel(selected) + (state.actual_muted ? " · 麥克風已靜音" : " · 已連線") : "音訊中斷，自動重連中";
-    if (wantsAudio && !document.hidden && state.healthy && audioSeen && (state.pid !== publisherPid || !wasHealthy)) frame.src = "/mic/?reconnect=" + Date.now();
+    if (wantsAudio && !integrated?.active && !document.hidden && state.healthy && audioSeen && (state.pid !== publisherPid || !wasHealthy)) frame.src = "/mic/?reconnect=" + Date.now();
     publisherPid = state.pid;
     wasHealthy = state.healthy;
     audioSeen = true;
   });
   async function checkPreview() {
+    if(integrated?.active){
+      if(healthBusy||document.hidden||pageGone)return;healthBusy=true;
+      try{const state=await ui.api('/stream-api/status',undefined,5000);if(integrated.active&&!document.hidden){streamWarning.hidden=state.healthy&&state.audio_included;streamWarning.textContent=!state.healthy?'音畫串流正在恢復。':state.warning||'目前串流只有影像，音訊恢復後會自動重新連接。';}}
+      catch(_){if(integrated.active){streamWarning.hidden=false;streamWarning.textContent='無法讀取音畫串流狀態，播放中斷時可按重新連線。';}}
+      finally{healthBusy=false;}return;
+    }
     if (mode === "low" || healthBusy || paused || pageGone || document.hidden) return;
     healthBusy = true;
     try {
@@ -275,6 +321,8 @@
   document.addEventListener("visibilitychange", () => {
     clearTimeout(levelTimer);
     if (document.hidden) {
+      clearTimeout(integrationRetry);integrationRetry=null;
+      integrated?.stop();
       pull?.stop(); clearTimeout(connectionTimer); clearTimeout(retryTimer); retryTimer = null;
       image.removeAttribute("src"); connected = false;
       wantsAudio = false; frame.removeAttribute("src"); listenButton();
@@ -282,9 +330,11 @@
     else { if (!paused) connect(); pollLevel(); }
   });
   window.addEventListener("pagehide", event => {
+    integrated?.stop();
     pull?.stop(); frame.removeAttribute("src"); wantsAudio = false;
     image.removeAttribute("src");
     pageGone = true;
+    clearTimeout(integrationRetry);integrationRetry=null;
     clearTimeout(levelTimer);
     clearTimeout(retryTimer); retryTimer = null; clearTimeout(connectionTimer);
     if (!event.persisted) clearInterval(monitorTimer);

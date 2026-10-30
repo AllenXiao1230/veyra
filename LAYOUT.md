@@ -9,13 +9,13 @@
 │   ├── ai/                 動作偵測與 ONNX 模型
 │   ├── recorder/           錄影控制 API
 │   ├── timestamp/          時間戳影像服務
-│   ├── common/             共用 Python 模組、音訊服務
+│   ├── common/             共用 Python 模組、音訊與整合串流服務
 │   └── management/         備份 API、部署工具、current-release
 ├── web/                    Nginx 唯一的靜態網站根目錄
 ├── config/
 │   ├── ai/                 正式 AI 設定
 │   ├── audio/              使用者音訊選擇（限制存取）
-│   ├── mediamtx/           音訊串流設定
+│   ├── mediamtx/           音訊、WebRTC／HLS 串流設定
 │   ├── systemd/{system,user}/
 │   ├── nginx/
 │   ├── logrotate/
@@ -24,7 +24,7 @@
 ├── data/
 │   ├── ai/                 事件資料庫、快照與快照回收桶
 │   ├── recordings/         影片、session、設定與影片回收桶
-│   ├── maintenance/        工作、收藏、匯出與隔離還原
+│   ├── maintenance/        工作、收藏／備註、站內通知、匯出與隔離還原
 │   └── timestamp/
 ├── backups/                備份快照、回收桶與歷版程式回滾包
 ├── cache/                  衍生播放快取
@@ -36,6 +36,25 @@
 ```
 
 只有 `web/` 經 Nginx 對外提供。設定、原始碼、資料庫、影片與備份不放在網站根目錄；媒體仍透過原有 API 存取。Git 只追蹤 source 內的程式、範本與文件，不包含正式設定、資料、模型或憑證。
+
+## features1 服務與入口
+
+Nginx 仍只監聽 `127.0.0.1:8090`，由現有 Tailscale Serve 私有 HTTPS 提供。六項健康 API 都只綁 loopback：
+
+| 連接埠 | 服務 | Nginx 入口 |
+| --- | --- | --- |
+| 8091 | `camera-recorder-api` 錄影控制／媒體 | `/recordings-api/` |
+| 8092 | `camera-ai` 動作偵測／快照 | `/ai-api/` |
+| 8093 | `camera-timestamp` 時間戳影像 | `/camera/` |
+| 8094 | `camera-audio` 麥克風發布／控制 | `/audio-api/` |
+| 8095 | `camera-backup-api` 備份、事件、通知、工作 | `/backups-api/`、`/events-api/` |
+| 8096 | `camera-stream` 音畫發布狀態 | `/stream-api/` |
+
+`camera-stream.service` 從時間戳來源取影像、從既有 mic 路徑取聲音，單一 VAAPI H.264 編碼分送 MediaMTX 的 WebRTC／Opus 與 HLS／AAC。WebRTC HTTP 經 `/stream/` 代理至 8889；HLS 經 `/stream-hls/` 代理至回環 8888，重新導向保留相對私有 HTTPS 路徑。部署合併 `live`／`live-hls` 與 HLS 設定，同時保留原有主機及麥克風設定；`mediamtx.yml.example` 不是可直接覆蓋正式設定的副本。
+
+`web/` 新增 `camera-center.js`、`camera-stream.js`、完整 `hls.min.js` 1.7.2 與 MIT 授權 `LICENSE-hls.txt`；HLS 程式只在需要時由本站載入。PyYAML（Ubuntu `python3-yaml`）供設定合併使用。`data/maintenance/notifications.sqlite3` 保存通知政策、事件及已讀狀態；`event-preferences.sqlite3` 的 `event_details` 保存標籤與備註。兩個資料庫以 SQLite backup 納入備份的 `maintenance-state/`。`jobs/`、`event-exports/`、`downloads/` 分別供 API 工作、匯出及原檔捷徑使用，工作中心不列出所有 systemd 排程歷史。
+
+原檔下載仍支援 Range，伺服器準備完成不代表瀏覽器已存檔。私有資料不由靜態根目錄提供，對應直接網址仍回 404。
 
 ## 系統入口與相容路徑
 
@@ -53,7 +72,7 @@ systemd 需在 `/etc/systemd/system/` 及使用者的 systemd 設定目錄註冊
 cd /srv/camera-monitor/source
 sudo /srv/camera-monitor/bin/camera-maintenance check
 sudo /srv/camera-monitor/bin/camera-maintenance backup
-sudo python3 preflight.py --stage . --manifest camera-monitor-layout1-manifest.json
+sudo python3 preflight.py --stage . --manifest camera-monitor-features1-manifest.json
 ```
 
 新備份 configuration.tar.gz 封存實際的 app／config／web／bin／vendor，避免只備份系統入口連結。媒體與資料庫仍由既有一致性備份流程處理；不遞迴備份 backups、archive 或自己。驗證器同時支援搬移前的 `opt/camera-ai/...` 與新 `srv/camera-monitor/app/ai/...` 封存格式，舊備份不改寫。

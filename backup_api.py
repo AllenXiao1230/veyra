@@ -24,6 +24,8 @@ from camera_timeline import Timeline
 from camera_media import send_file
 from camera_storage import storage_summary
 from camera_diagnostics import PROBE, read_state
+from camera_notifications import Notifications
+from camera_work import WorkCenter
 
 
 class Jobs:
@@ -37,10 +39,13 @@ class Jobs:
         for path in self.directory.glob("*.json"):
             try:
                 data = json.loads(path.read_text())
+                if not isinstance(data,dict):raise ValueError('Invalid job')
                 if data.get("state") in {"queued", "running"}:
                     data.update(state="interrupted", error="服務曾重新啟動，請重新執行工作", ended_at=time.time())
                     atomic_json(path, data)
             except (OSError, ValueError):
+                try:os.replace(path,path.with_suffix('.invalid'))
+                except OSError:pass
                 continue
 
     def audit(self, action, result, name=None):
@@ -63,7 +68,7 @@ class Jobs:
         return rows
 
     def get(self, job_id):
-        if not re.fullmatch(r"[0-9a-f]{32}", job_id):
+        if not isinstance(job_id,str) or not re.fullmatch(r"[0-9a-f]{32}", job_id):
             raise ValueError("工作編號不正確")
         return json.loads((self.directory / (job_id + ".json")).read_text())
 
@@ -160,6 +165,18 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         jobs, store = self.server.jobs, self.server.jobs.store
         try:
+            if path=='/health':
+                self.send_json(200,{'healthy':True,'service':'camera-backup-api'});return
+            if path=='/notifications':
+                from urllib.parse import parse_qs
+                params=parse_qs(urlparse(self.path).query)
+                self.send_json(200,self.server.notifications.list(int(params.get('before',['0'])[0]),
+                    int(params.get('limit',['30'])[0]),params.get('unread',['0'])[0]=='1'))
+                return
+            if path=='/notifications/policy':
+                self.send_json(200,self.server.notifications.policy());return
+            if path=='/work':
+                self.send_json(200,self.server.work.list(urlparse(self.path).query));return
             if path == '/probe':
                 send_file(self,store.state/'transport-probe.bin')
                 return
@@ -210,6 +227,18 @@ class Handler(BaseHTTPRequestHandler):
         jobs, store = self.server.jobs, self.server.jobs.store
         try:
             data = read_body(self)
+            if path=='/notifications/read':
+                self.send_json(200,self.server.notifications.acknowledge(data.get('through')));return
+            if path=='/notifications/policy':
+                self.send_json(200,self.server.notifications.policy(data));return
+            if path=='/work/download':
+                self.send_json(201,self.server.work.register(data.get('kind'),data.get('filename')));return
+            if path=='/work/cancel':
+                self.send_json(200,self.server.timeline.cancel(data.get('id')));return
+            if path=='/work/retry':
+                self.send_json(202,self.server.work.retry(data.get('kind'),data.get('id')));return
+            if path=='/events/annotate':
+                self.send_json(200,self.server.timeline.annotate(data.get('id'),data.get('note'),data.get('tags')));return
             if path == '/events/favorite':
                 self.send_json(200, self.server.timeline.favorite(data.get('ids'), data.get('favorite')))
                 return
@@ -243,6 +272,8 @@ def main():
     server.daemon_threads = True
     server.jobs = Jobs(store)
     server.timeline = Timeline(maintenance.DATA, maintenance.RECORDINGS, maintenance.STATE)
+    server.notifications=Notifications(store.state)
+    server.work=WorkCenter(server.timeline,server.jobs,lambda:maintenance.http_json('http://127.0.0.1:8091/status'))
     probe = store.state/'transport-probe.bin'
     probe.write_bytes(PROBE); probe.chmod(0o600)
     maintenance_stop = threading.Event()

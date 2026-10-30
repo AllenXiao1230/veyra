@@ -1,0 +1,19 @@
+# Restore the existing host-specific configuration before enabling live streaming.
+logLevel: info
+rtsp: yes
+rtspAddress: 127.0.0.1:8554
+webrtc: yes
+webrtcAddress: 127.0.0.1:8889
+webrtcLocalUDPAddress: 127.0.0.1:8189
+webrtcAdditionalHosts: [127.0.0.1]
+hls: no
+rtmp: no
+srt: no
+api: no
+metrics: no
+pprof: no
+moq: no
+pathDefaults:
+  record: no
+paths:
+  mic:
