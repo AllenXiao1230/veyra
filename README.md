@@ -1,10 +1,20 @@
 # Camera Monitor
 
-Ubuntu 攝影機監控專案的維護來源，包含 `hybrid1`、`stability1` 與 `mobile1` 擴充：背景移動偵測、事件快照、時間戳直播、
+Ubuntu 攝影機監控專案的維護來源，包含 `hybrid1`、`stability1`、`mobile1` 與 `reliability1` 擴充：背景移動偵測、事件快照、時間戳直播、
 動態錄影、事件時間軸、健康監控與本機增量備份。網頁透過 nginx 和 Tailscale 提供私有存取。
 
 這份 repository 是既有服務的維護來源，不是從零安裝套件；各版本的部署／驗收結果須以對應交付紀錄為準。完整操作說明與驗收限制見
 [README_camera_monitor.md](README_camera_monitor.md)。
+
+## 錄影與資料可靠性（reliability1）
+
+錄影持續檢查 FFmpeg 輸出時間與檔案增長，停滯時先封裝再退避重試。音訊不可用時改錄純影像並顯示警告；恢復後接續含音訊的新片段，切換可能有短暫間隙。每個片段獨立標示活動／完成／損壞／未知；重啟對帳保留原檔，不宣稱修復損壞影片。
+
+AI 改用有界背景佇列，動作先記錄，時間軸明示「AI 分析中」或「AI 未完成」；可用「AI 未完成」篩選。保存期限仍預設 0；明確設為正數後，`cleanup --apply` 先備份、將到期媒體移到可復原回收桶，保護收藏事件的快照與可關聯錄影，不刪除事件紀錄。
+
+設定 → 備份管理 →「儲存與服務狀態」可看分類占用、檢查時間、必要異常及條件成立時的可錄天數估計。備份與匯出共用空間預留；快照低於 2GiB 保留空間時暫停新增圖片，仍保存事件。匯出壞工作紀錄隔離，背景每分鐘清理到期衍生檔，不需等待下次匯出。
+
+健康維護加入本機 Nginx 內容／Range 驗證與 36 小時內成功備份檢查；狀態變更記錄在伺服器，未設定外部通知。這些不能證明遠端大檔或實體 iPhone 正常。本版最終測試／部署另見交付紀錄；完整來源清單、預檢與人工重建／回滾流程見 [RECOVERY.md](RECOVERY.md)。
 
 ## 手機預覽、事件與回收桶（mobile1）
 
@@ -30,6 +40,8 @@ Ubuntu 攝影機監控專案的維護來源，包含 `hybrid1`、`stability1` �
 | `camera_audio.py` | `/opt/camera-common/camera_audio.py`，來源選擇、音訊 API 與發布 supervisor |
 | `camera_media.py` | `/opt/camera-common/camera_media.py`，完整媒體清單、日期分類、縮圖與回收桶 |
 | `camera_timeline.py` | `/opt/camera-common/camera_timeline.py`，事件分頁、收藏與伺服器匯出 |
+| `camera_annotations.py`、`camera_sessions.py`、`camera_storage.py`、`camera_diagnostics.py` | 有界 AI 分類、逐檔對帳、空間預留與本機入口檢查 |
+| `release_manifest.py`、`preflight.py`、`camera_deployment.py` | 完整來源清單、唯讀主機預檢與部署期間工作閘門 |
 | `camera-ui.css`、`camera-ui.js`、`camera-live.js`、`camera-library.js` | 共用介面、設定、監看與媒體互動 |
 | `camera-mobile.js`、`camera-timeline.js`、`camera-backups.js` | 單張 JPEG 生命週期、事件時間軸與備份管理 |
 | `camera-audio.service` | 使用者 unit，`~/.config/systemd/user/camera-audio.service` |
@@ -53,6 +65,7 @@ python3 test_camera_audio.py
 python3 test_camera_media.py
 sudo python3 test_camera_maintenance.py
 python3 test_camera_events.py
+python3 test_camera_reliability.py
 ```
 
 維護測試會在 temporary directory 建立測試資料。它在 Ubuntu 上以管理權限驗證
@@ -93,7 +106,7 @@ MediaMTX 是 Wants 相依性，允許它重啟時音訊 supervisor 繼續執行�
 API：`GET /audio-api/status`、`GET /audio-api/health`；
 `POST /audio-api/source` 接受 `source`、整數 `volume`、布林 `muted`；
 `POST /audio-api/restart` 接受空 JSON 物件。寫入 API 驗證同源、請求格式與來源清單，
-僅透過現有 nginx/Tailscale 入口存取。錄影仍要求有效音訊，沒有加入靜默降級為無聲錄影的行為。
+僅透過現有 nginx/Tailscale 入口存取。reliability1 起音訊失效可錄純影像，介面及 session 明示缺音訊；恢復後接續新片段，不把無音軌標成音訊正常。
 
 ## 媒體管理（library1）
 
@@ -139,4 +152,4 @@ systemctl list-timers 'camera-*' --no-pager
 ```
 
 `retention_days: 0` 代表保留全部正式資料。變更保存政策、正式環境設定及資料復原時，
-先閱讀完整維護文件並確認備份。`rollback-core.sh` 是特定部署的人工回退工具，不是一般安裝程式。
+先閱讀完整維護文件並確認備份。`cleanup` 只預覽，`cleanup --apply` 才執行已選政策，且只移回收桶；不會自動永久清除。`rollback-core.sh` 是特定部署的人工回退工具，不是一般安裝程式。

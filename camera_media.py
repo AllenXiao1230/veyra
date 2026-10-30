@@ -90,14 +90,20 @@ class MediaLibrary:
             raise FileNotFoundError("找不到檔案，可能已移至回收桶")
         return path
 
-    def event_dates(self, details=False):
+    def event_dates(self, details=False, names=None):
         if not self.db_path:
             return {}
         with closing(sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True, timeout=5)) as db:
+            clause = ''
+            values = []
+            if names is not None:
+                if not names: return {}
+                clause = ' AND snapshot_name IN (' + ','.join('?' for _ in names) + ')'
+                values = names
             columns = {r[1] for r in db.execute("PRAGMA table_info(events)")}
             if details and {"person_detected", "confidence", "metadata_json"}.issubset(columns):
                 result = {}
-                for row in db.execute("SELECT snapshot_name,id,person_detected,confidence,metadata_json FROM events WHERE snapshot_name != '' ORDER BY id"):
+                for row in db.execute("SELECT snapshot_name,id,person_detected,confidence,metadata_json FROM events WHERE snapshot_name != ''"+clause+" ORDER BY id", values):
                     try:
                         metadata = json.loads(row[4] or "{}")
                         ready = metadata.get("ai_ready") if isinstance(metadata, dict) else None
@@ -108,17 +114,21 @@ class MediaLibrary:
             if details:
                 return {}
             return {name: stamp for name, stamp in db.execute(
-                "SELECT snapshot_name, created_at FROM events WHERE snapshot_name != '' ORDER BY id")}
+                "SELECT snapshot_name, created_at FROM events WHERE snapshot_name != ''"+clause+" ORDER BY id", values)}
 
     def created_at(self, path, dates):
         try:
-            if path.name in dates:
+            if not callable(dates) and path.name in dates:
                 stamp = datetime.fromisoformat(dates[path.name].replace("Z", "+00:00"))
                 return stamp.replace(tzinfo=timezone.utc) if stamp.tzinfo is None else stamp
             if self.kind == "snapshot" and re.fullmatch(r"event-\d{8}T\d{6}_\d{6}Z.jpg", path.name):
                 return datetime.strptime(path.stem, "event-%Y%m%dT%H%M%S_%fZ").replace(tzinfo=timezone.utc)
             if self.kind == "recording":
                 return datetime.strptime(path.stem[:25], "recording-%Y%m%d-%H%M%S").replace(tzinfo=TAIPEI)
+            if callable(dates):
+                found = dates([path.name])
+                if path.name in found:
+                    return datetime.fromisoformat(found[path.name].replace('Z','+00:00'))
         except (ValueError, TypeError):
             pass
         return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
@@ -141,11 +151,13 @@ class MediaLibrary:
                     raise ValueError()
             except Exception as exc:
                 raise ValueError("分頁位置不正確，請重新整理") from exc
-        dates = self.event_dates()
+        dates = lambda names: self.event_dates(names=names)
         page, total, filtered, counts, has_more = self.index.page(self.valid_name, self.created_at, dates, date, cursor, limit)
-        annotations = self.event_dates(details=True)
+        annotations = self.event_dates(details=True,names=[r['filename'] for r in page])
         for row in page:
             name = row["filename"]
+            try: row['size'] = (self.root/name).stat().st_size
+            except OSError: pass
             row["active"] = bool(self.active(name))
             if self.kind == "recording":
                 match = re.search(r"-([0-9a-f]{12})\.mp4$", name)

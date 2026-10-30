@@ -20,6 +20,9 @@ from camera_runtime import MJPEGCapture
 from camera_media import MediaLibrary, media_error, read_body, send_file
 from camera_state import media_guard
 from camera_person import PersonAnnotator
+from camera_storage import require_space, StoragePressure
+from camera_annotations import AnnotationWorker
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -133,6 +136,7 @@ class EventStore:
                 """
             )
             db.execute("CREATE INDEX IF NOT EXISTS events_created_at ON events(created_at DESC)")
+            db.execute("UPDATE events SET metadata_json=json_set(metadata_json,'$.ai_status','unavailable','$.ai_ready',json('false')) WHERE json_valid(metadata_json) AND json_extract(metadata_json,'$.ai_status')='pending'")
         # Keep WAL/shm available to readers in a read-only service mount.
         # This connection holds no transaction and is never used by workers.
         self._wal_keeper = self.connect()
@@ -143,7 +147,17 @@ class EventStore:
         db.row_factory = sqlite3.Row
         return db
 
+    def annotate(self, identifier, person, confidence, count, ready):
+        with media_guard(self.data_dir), closing(self.connect()) as db, db:
+            row=db.execute('SELECT metadata_json FROM events WHERE id=?',(identifier,)).fetchone()
+            if row is None:return
+            metadata=json.loads(row[0]);metadata.update(person_count=count,ai_ready=ready,
+                                                      ai_status='complete' if ready else 'unavailable')
+            db.execute('UPDATE events SET event_type=?,person_detected=?,confidence=?,metadata_json=? WHERE id=?',
+                       ('person' if person else 'motion',int(person),confidence,json.dumps(metadata,ensure_ascii=False),identifier))
+
     def save_snapshot(self, frame: np.ndarray, quality: int) -> str:
+        require_space(self.snapshots_dir)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
         name = f"event-{stamp}.jpg"
         destination = self.snapshots_dir / name
@@ -348,6 +362,10 @@ class DetectorService:
         self.person_detector = OnnxPersonDetector(settings)
         if settings.person_detector == "yolox":
             self.person_detector = PersonAnnotator(settings.onnx_model, settings.person_threshold)
+        def classify(frame):
+            person,confidence,count=self.person_detector.detect(frame)
+            return person,confidence,count,self.person_detector.ready
+        self.annotations=AnnotationWorker(classify,self.store.annotate)
         self.stop_requested = threading.Event()
         self.state_lock = threading.Lock()
         self.last_frame_tick = 0.0
@@ -457,28 +475,28 @@ class DetectorService:
 
                 now = time.monotonic()
                 if consecutive_motion >= self.settings.motion_min_frames and now - last_event_monotonic >= self.settings.event_cooldown_seconds:
-                    try:
-                        person, confidence, person_count = self.person_detector.detect(frame)
-                    except Exception as error:
-                        # Classification may degrade; it must never gate motion records.
-                        person, confidence, person_count = False, None, 0
-                        self.person_detector.ready = False
-                        self.person_detector.reason = "AI 分類失敗；動作仍會記錄：" + str(error)[-160:]
-                    event_type = "person" if person else "motion"
+                    event_type = "motion"
+                    pending=self.annotations.accepting
                     # Keep a just-written snapshot and its event indivisible to trash requests.
                     with self.media.lock, media_guard(self.settings.data_dir):
-                        snapshot_name = self.store.save_snapshot(frame, self.settings.jpeg_quality)
+                        try:
+                            snapshot_name = self.store.save_snapshot(frame, self.settings.jpeg_quality)
+                            self.update_state(storage_warning=None)
+                        except StoragePressure as error:
+                            snapshot_name = ''
+                            self.update_state(storage_warning=str(error))
                         event_id = self.store.add_event(
                             event_type=event_type,
                             motion_area=motion_area,
-                            person_detected=person,
-                            confidence=confidence,
+                            person_detected=False,
+                            confidence=None,
                             snapshot_name=snapshot_name,
-                            metadata={"person_count": person_count, "capture_width": int(frame.shape[1]),
-                                      "trigger": "motion", "ai_ready": self.person_detector.ready,
-                                      "ai_status": self.person_detector.reason,
+                            metadata={"person_count": 0, "capture_width": int(frame.shape[1]),
+                                      "trigger": "motion", "ai_ready": None,
+                                      "ai_status": 'pending' if pending else 'unavailable',
                                       "motion_sequence": self.motion_sequence},
                         )
+                    if pending:self.annotations.submit(event_id,frame)
                     LOG.info("stored %s event id=%s motion_area=%.1f", event_type, event_id, motion_area)
                     last_event_monotonic = now
                     self.last_event_id = event_id
@@ -491,6 +509,7 @@ class DetectorService:
             self.motion_active = False
             if capture is not None:
                 capture.release()
+            if self.stop_requested.is_set():self.annotations.close()
             self.update_state(running=False)
 
 

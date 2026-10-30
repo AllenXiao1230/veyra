@@ -128,6 +128,7 @@ class BackupStore:
         self.root, self.state = Path(root), Path(state)
         self.trash = self.root / ".trash"
         self.recoveries = self.state / "recoveries"
+        self._capacity_cache = None
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.state.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.reconcile()
@@ -184,6 +185,9 @@ class BackupStore:
         return sorted(rows, key=lambda r: r["name"], reverse=True)
 
     def capacity(self):
+        signature = (self.root.stat().st_mtime_ns, self.trash.stat().st_mtime_ns if self.trash.exists() else 0)
+        if self._capacity_cache and self._capacity_cache[0] == signature and time.monotonic()-self._capacity_cache[1] < 60:
+            return dict(self._capacity_cache[2])
         seen, logical, physical = set(), 0, 0
         for path in files_under(self.root, allow_latest=True):
             # latest is the only permitted link and os.walk does not follow it.
@@ -193,7 +197,9 @@ class BackupStore:
             if key not in seen:
                 seen.add(key)
                 physical += getattr(stat, "st_blocks", 0) * 512 or stat.st_size
-        return {"logical_bytes": logical, "physical_bytes": physical}
+        result = {"logical_bytes": logical, "physical_bytes": physical}
+        self._capacity_cache = (signature,time.monotonic(),result)
+        return dict(result)
 
     def _receipt(self, token):
         if not isinstance(token, str) or not re.fullmatch(r"[0-9a-f]{32}", token):

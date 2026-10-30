@@ -13,6 +13,7 @@ import time
 import sys
 import tempfile
 import errno
+import re
 from contextlib import closing
 import urllib.error
 import urllib.request
@@ -20,7 +21,9 @@ from datetime import datetime, timedelta, timezone
 sys.path.append("/opt/camera-common")
 from camera_state import media_guard, atomic_json
 from camera_backups import index_files
-from camera_storage import check_backup_budget
+from camera_storage import check_backup_budget, reserve_space
+from camera_media import MediaLibrary
+from camera_diagnostics import ingress_check
 
 STATE = pathlib.Path("/var/lib/camera-maintenance")
 BACKUPS = pathlib.Path("/var/backups/camera-monitor/snapshots")
@@ -49,7 +52,7 @@ def health(repair=False):
     previous = read_json(STATE / "status.json", {})
     result = {"checked_at": datetime.now(timezone.utc).isoformat(), "services": {}}
     for name, port in [("camera-ai", 8092), ("camera-recorder-api", 8091), ("camera-timestamp", 8093),
-                       ("camera-audio", 8094)]:
+                       ("camera-audio", 8094), ('camera-backup-api',8095)]:
         try:
             state = http_json(f"http://127.0.0.1:{port}/health")
             healthy = bool(state.get("healthy"))
@@ -79,6 +82,30 @@ def health(repair=False):
     result["disk"] = {"free_bytes": usage.free, "used_percent": round(100 * usage.used / usage.total, 1),
                       "warning": usage.free < 10 * 1024 ** 3 or usage.used / usage.total > 0.85}
     result["healthy"] = all(s["healthy"] for s in result["services"].values()) and not result["disk"]["warning"]
+    result['entrypoint'] = ingress_check()
+    latest = BACKUPS/'latest'
+    manifest = read_json(latest/'manifest.json',{})
+    age = time.time()-manifest.get('created_at',0)
+    result['backup'] = {'healthy':manifest.get('complete') is True and age < 36*3600,
+                        'age_hours':round(age/3600,1) if manifest else None,'external_configured':False}
+    issues = [{'id':name,'message':name+' 服務異常'} for name,s in result['services'].items() if not s['healthy']]
+    if result['disk']['warning']: issues.append({'id':'storage','message':'儲存空間偏低，請管理資料'})
+    if not result['backup']['healthy']: issues.append({'id':'backup-stale','message':'尚無近期成功備份，請檢查備份工作'})
+    if not result['entrypoint']['healthy']: issues.append({'id':'ingress','message':'本機網站下載路徑驗證失敗'})
+    for name,s in result['services'].items():
+        warning = s['detail'].get('warning') or s['detail'].get('storage_warning')
+        if warning: issues.append({'id':name+'-warning','message':warning})
+    result['issues'] = issues
+    result['healthy'] = result['healthy'] and result['entrypoint']['healthy'] and result['backup']['healthy']
+    previous_ids = {i['id'] for i in previous.get('issues',[])}
+    current_ids = {i['id'] for i in issues}
+    result['changes'] = {'opened':sorted(current_ids-previous_ids),'recovered':sorted(previous_ids-current_ids)}
+    if any(result['changes'].values()):
+        STATE.mkdir(parents=True,exist_ok=True)
+        path = STATE/'health-events.jsonl'
+        if path.exists() and path.stat().st_size > 1024**2: os.replace(path,path.with_suffix('.previous.jsonl'))
+        with path.open('a') as stream:
+            stream.write(json.dumps({'at':result['checked_at'],**result['changes']})+'\n')
     atomic_json(STATE / "status.json", result)
     return result
 
@@ -133,11 +160,11 @@ def backup(dry_run=False, progress=None):
             try:
                 current = http_json("http://127.0.0.1:8091/status")
             except Exception:
-                current = {"recording": True, "active_files": []}
+                current = {"recording": True, "active_files": [], 'unavailable':True}
             recordings = [p for p in RECORDINGS.iterdir() if p.is_file() and not p.is_symlink() and p.suffix.lower() in {".mp4", ".mkv"}]
             active = set(current.get("active_files", []))
             changing = current.get("recording") or current.get("recording_state") in {"starting", "stopping"}
-            skipped = [p.name for p in recordings if p.name in active or (changing and p.stat().st_mtime > time.time() - 60)]
+            skipped = [p.name for p in recordings if current.get('unavailable') or p.name in active or (changing and p.stat().st_mtime > time.time() - 60)]
             with closing(sqlite3.connect(f"file:{DATA / 'events.sqlite3'}?mode=ro", uri=True)) as source:
                 with closing(sqlite3.connect(destination / "events.sqlite3")) as target:
                     source.backup(target)
@@ -163,7 +190,9 @@ def backup(dry_run=False, progress=None):
                 pin_file(policy, pins / "maintenance-state" / "storage-policy.json")
         if progress:
             progress("封存設定與複製媒體", 0, 0)
-        return _finish_backup(destination, pins, plan, skipped, progress)
+        estimate=plan['recording_bytes']+extra_bytes+256*1024**2
+        with reserve_space(STATE,BACKUPS,estimate):
+            return _finish_backup(destination, pins, plan, skipped, progress)
     finally:
         shutil.rmtree(pins)
         for descriptor in descriptors:
@@ -224,10 +253,22 @@ def retention_plan():
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     with sqlite3.connect(f"file:{DATA / 'events.sqlite3'}?mode=ro", uri=True) as db:
         rows = db.execute("SELECT id,created_at,snapshot_name FROM events").fetchall()
-    events = [(i, stamp, name) for i, stamp, name in rows if datetime.fromisoformat(stamp) < cutoff]
+    favorites = set()
+    preferences = STATE/'event-preferences.sqlite3'
+    if preferences.is_file():
+        with closing(sqlite3.connect(f'file:{preferences}?mode=ro',uri=True)) as prefs:
+            favorites = {r[0] for r in prefs.execute('SELECT event_id FROM favorites WHERE favorite=1')}
+    events = [(i, stamp, name) for i, stamp, name in rows if i not in favorites and datetime.fromisoformat(stamp) < cutoff]
+    protected = set()
+    for path in (RECORDINGS/'sessions').glob('*.json'):
+        if path.is_symlink(): continue
+        session = read_json(path,{})
+        if favorites.intersection(session.get('event_ids',[])):
+            protected.update(session.get('files',[]))
     media = [str(p) for p in RECORDINGS.iterdir() if p.is_file() and p.suffix.lower() in {".mp4", ".mkv"}
-             and p.stat().st_mtime < cutoff.timestamp()]
-    return {"enabled": True, "days": days, "cutoff": cutoff.isoformat(), "events": events, "recordings": media}
+             and p.name not in protected and not p.is_symlink() and p.stat().st_mtime < cutoff.timestamp()]
+    return {"enabled": True, "days": days, "cutoff": cutoff.isoformat(), "events": events, "recordings": media,
+            'protected_favorites':len(favorites),'mode':'trash','permanent_delete':False}
 
 
 def cleanup(apply=False):
@@ -249,16 +290,44 @@ def cleanup(apply=False):
         if path.resolve().parent != RECORDINGS.resolve():
             raise RuntimeError("Recording path outside expected directory")
         media.append(path)
-    # A complete recoverable copy is required before any live-data removal.
+    # Preserve the existing backup prerequisite; expiry is reversible removal.
     backup()
-    with sqlite3.connect(DATA / "events.sqlite3") as db:
-        db.execute("BEGIN IMMEDIATE")
-        db.executemany("DELETE FROM events WHERE id=?", [(row[0],) for row in plan["events"]])
+    def protected(name,kind):
+        preferences=STATE/'event-preferences.sqlite3'
+        if not preferences.is_file(): return False
+        try:
+            with closing(sqlite3.connect(f'file:{preferences}?mode=ro',uri=True)) as db:
+                favorites={r[0] for r in db.execute('SELECT event_id FROM favorites WHERE favorite=1')}
+            if not favorites:return False
+            if kind=='snapshot':
+                with closing(sqlite3.connect(f'file:{DATA/"events.sqlite3"}?mode=ro',uri=True)) as db:
+                    return any(r[0] in favorites for r in db.execute('SELECT id FROM events WHERE snapshot_name=?',(name,)))
+            match=re.search(r'-([0-9a-f]{12})\.mp4$',name)
+            if match:
+                session=read_json(RECORDINGS/'sessions'/(match[1]+'.json'),{})
+                return bool(favorites.intersection(session.get('event_ids',[])))
+            return False
+        except (OSError,ValueError,sqlite3.Error):
+            return True
+    snapshots_library = MediaLibrary(DATA/'snapshots','snapshot',DATA/'events.sqlite3',active=lambda n:protected(n,'snapshot'))
+    def active(name):
+        if protected(name,'recording'):return True
+        try:
+            current = http_json('http://127.0.0.1:8091/status')
+            return name in current.get('active_files',[]) or current.get('recording_state') == 'starting'
+        except Exception:
+            return True
+    video_library = MediaLibrary(RECORDINGS,'recording',active=active)
+    results = []
     for path in snapshots:
-        path.unlink(missing_ok=True)
+        try: results.append(snapshots_library.move_to_trash(path.name))
+        except Exception as error: results.append({'filename':path.name,'error':str(error)})
     for path in media:
-        path.unlink()
+        try: results.append(video_library.move_to_trash(path.name))
+        except Exception as error: results.append({'filename':path.name,'error':str(error)})
     plan["applied"] = True
+    plan.update(results=results, moved=sum(bool(r.get('ok')) for r in results),
+                failed=sum(not r.get('ok') for r in results), mode='trash',permanent_delete=False)
     return plan
 
 

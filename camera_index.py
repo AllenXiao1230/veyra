@@ -3,6 +3,7 @@ from contextlib import closing
 import sqlite3
 import threading
 import time
+import os
 
 
 class MediaIndex:
@@ -20,13 +21,19 @@ class MediaIndex:
     def page(self, valid, created, dates, date, cursor, limit):
         with self.lock, closing(sqlite3.connect(self.path, timeout=5)) as db:
             signature = self.root.stat().st_mtime_ns
-            if signature != self.signature or time.monotonic() - self.checked >= 2:
+            full = time.monotonic() - self.checked >= 60
+            if signature != self.signature or full:
+                previous = {r[0]:(r[1],r[2],r[3],r[4]) for r in db.execute('SELECT filename,created_at,date,size,mtime_ns FROM media')}
                 rows = []
-                for path in self.root.iterdir():
+                present = set()
+                for entry in os.scandir(self.root):
+                    path=self.root/entry.name
                     try:
                         valid(path.name)
-                        if path.is_symlink() or not path.is_file():
+                        if entry.is_symlink() or not entry.is_file():
                             continue
+                        present.add(path.name)
+                        if not full and path.name in previous:continue
                         stat = path.stat()
                         stamp = created(path, dates)
                         from datetime import timezone, timedelta
@@ -36,12 +43,10 @@ class MediaIndex:
                     except (OSError, ValueError):
                         continue
                 with db:
-                    db.execute("CREATE TEMP TABLE present(filename TEXT PRIMARY KEY)")
-                    db.executemany("INSERT INTO present VALUES(?)", [(r[0],) for r in rows])
                     db.executemany("INSERT INTO media VALUES(?,?,?,?,?) ON CONFLICT(filename) DO UPDATE SET created_at=excluded.created_at,date=excluded.date,size=excluded.size,mtime_ns=excluded.mtime_ns WHERE media.created_at!=excluded.created_at OR media.size!=excluded.size OR media.mtime_ns!=excluded.mtime_ns", rows)
-                    db.execute("DELETE FROM media WHERE filename NOT IN (SELECT filename FROM present)")
-                self.signature = self.root.stat().st_mtime_ns
-                self.checked = time.monotonic()
+                    db.executemany('DELETE FROM media WHERE filename=?',[(n,) for n in previous.keys()-present])
+                self.signature = signature if self.root.stat().st_mtime_ns==signature else None
+                if full: self.checked = time.monotonic()
             clause, values = (" WHERE date=?", [date]) if date else ("", [])
             total = db.execute("SELECT count(*) FROM media").fetchone()[0]
             filtered = db.execute("SELECT count(*) FROM media" + clause, values).fetchone()[0]

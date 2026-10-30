@@ -16,6 +16,8 @@ from contextlib import closing, ExitStack
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, quote
 from camera_state import atomic_json, media_guard
+from camera_storage import reserve_space
+from camera_deployment import deployment_active
 
 TAIPEI = timezone(timedelta(hours=8))
 VIDEO = re.compile(r'recording-\d{8}-\d{6}(?:-[0-9a-f]{12})?\.(mp4|mkv)')
@@ -30,15 +32,21 @@ class Timeline:
         self.exports.mkdir(exist_ok=True)
         self.lock, self.export_lock = threading.RLock(), threading.Lock()
         self.synced_at = 0
+        self.date_cache = {}
         with closing(self.prefs()) as db, db:
             db.executescript('''CREATE TABLE IF NOT EXISTS favorites(event_id INTEGER PRIMARY KEY, favorite INTEGER NOT NULL);
               CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, mtime TEXT);
               CREATE TABLE IF NOT EXISTS links(event_id INTEGER, filename TEXT, session_id TEXT, complete INTEGER,
               PRIMARY KEY(event_id, filename)); CREATE INDEX IF NOT EXISTS links_event ON links(event_id);''')
+            db.execute('CREATE TABLE IF NOT EXISTS link_states(event_id INTEGER,filename TEXT,state TEXT,PRIMARY KEY(event_id,filename))')
         for path in self.exports.glob('*.job.json'):
             try:
                 job = json.loads(path.read_text())
+                if not isinstance(job,dict) or type(job.get('expires_at')) not in (int,float):
+                    raise ValueError('Invalid job record')
             except (OSError, ValueError):
+                try: os.replace(path,path.with_suffix('.invalid'))
+                except OSError: pass
                 continue
             if job.get('state') in ('queued', 'running'):
                 job.update(state='interrupted', error='服務曾重新啟動，請重新匯出')
@@ -51,6 +59,10 @@ class Timeline:
         db = sqlite3.connect(f'file:{self.data / "events.sqlite3"}?mode=ro', uri=True, timeout=5)
         db.row_factory = sqlite3.Row
         db.execute('ATTACH DATABASE ? AS prefs', (f'file:{self.preferences}?mode=ro',))
+        columns = {r[1] for r in db.execute('PRAGMA table_info(events)')}
+        self.ai_expression = ("CASE WHEN e.person_detected=1 THEN 'person' WHEN json_valid(e.metadata_json) AND json_extract(e.metadata_json,'$.ai_status')='pending' AND julianday(e.created_at)>julianday('now','-60 seconds') THEN 'pending' WHEN json_valid(e.metadata_json) "
+                              "AND json_extract(e.metadata_json,'$.ai_ready')=1 THEN 'motion' ELSE 'unknown' END"
+                              if 'metadata_json' in columns else "CASE WHEN e.person_detected=1 THEN 'person' ELSE 'unknown' END")
         return db
 
     def sync_links(self):
@@ -63,23 +75,30 @@ class Timeline:
                         continue
                     try:
                         stat = path.stat()
+                        identity = f'v2:{stat.st_mtime_ns}:{stat.st_size}'
+                        old = db.execute('SELECT mtime FROM sessions WHERE id=?', (path.stem,)).fetchone()
+                        if old and old[0] == identity:
+                            continue
                         session = json.loads(path.read_text())
                         if not isinstance(session, dict) or not isinstance(session.get('event_ids', []), list) or not isinstance(session.get('files', []), list):
                             continue
                     except (OSError, ValueError):
                         continue
-                    identity = f'{stat.st_mtime_ns}:{stat.st_size}'
-                    old = db.execute('SELECT mtime FROM sessions WHERE id=?', (path.stem,)).fetchone()
-                    if old and old[0] == identity:
-                        continue
+                    db.execute('DELETE FROM link_states WHERE (event_id,filename) IN (SELECT event_id,filename FROM links WHERE session_id=?)',(path.stem,))
                     db.execute('DELETE FROM links WHERE session_id=?', (path.stem,))
+                    valid_names = [n for n in session['files'] if isinstance(n,str) and VIDEO.fullmatch(n)]
                     for event_id in session.get('event_ids', []):
                         if type(event_id) is not int or event_id <= 0:
                             continue
                         for name in session.get('files', []):
                             if isinstance(name, str) and VIDEO.fullmatch(name):
-                                db.execute('INSERT OR REPLACE INTO links VALUES(?,?,?,?)',
-                                           (event_id, name, path.stem, int(bool(session.get('ended_at')))))
+                                states = session.get('file_states', {})
+                                state = states.get(name) if isinstance(states, dict) else None
+                                if state not in ('complete','recording','damaged','missing','unknown'):
+                                    state = 'complete' if session.get('ended_at') or name != max(valid_names) else 'recording'
+                                db.execute('INSERT OR REPLACE INTO links(event_id,filename,session_id,complete) VALUES(?,?,?,?)',
+                                           (event_id, name, path.stem, int(state == 'complete')))
+                                db.execute('INSERT OR REPLACE INTO link_states VALUES(?,?,?)',(event_id,name,state))
                     db.execute('INSERT OR REPLACE INTO sessions VALUES(?,?)', (path.stem, identity))
             self.synced_at = time.monotonic()
 
@@ -97,10 +116,10 @@ class Timeline:
                 item.update(favorite=bool(item.get('favorite')), date=(datetime.fromisoformat(item['created_at']).astimezone(TAIPEI).date().isoformat()),
                             snapshot_name=name if valid else None,
                             snapshot_url='/ai-api/snapshots/' + quote(name) if valid else None, recordings=[])
-                for filename, complete in db.execute('SELECT filename,complete FROM links WHERE event_id=? ORDER BY filename', (item['id'],)):
+                for filename, complete, state in db.execute("SELECT l.filename,l.complete,coalesce(s.state,CASE WHEN l.complete=1 THEN 'complete' ELSE 'recording' END) FROM links l LEFT JOIN link_states s ON s.event_id=l.event_id AND s.filename=l.filename WHERE l.event_id=? ORDER BY l.filename", (item['id'],)):
                     video = self.videos / filename
                     if not video.is_symlink() and video.is_file():
-                        item['recordings'].append({'filename': filename, 'complete': bool(complete),
+                        item['recordings'].append({'filename': filename, 'complete': bool(complete), 'state':state,
                             'url': '/recordings-api/file/' + quote(filename),
                             'playback_url': '/recordings-api/playback/' + quote(filename)})
                 result.append(item)
@@ -116,26 +135,35 @@ class Timeline:
         if params.get('favorite', ['0'])[0] == '1':
             where.append('p.favorite=1')
         kind = params.get('type', ['all'])[0]
-        if kind not in ('all', 'person', 'motion'):
+        if kind not in ('all', 'person', 'motion', 'unknown'):
             raise ValueError('事件分類不正確')
-        if kind != 'all':
-            where.append('e.person_detected=?')
-            values.append(int(kind == 'person'))
         join = ' FROM events e LEFT JOIN prefs.favorites p ON p.event_id=e.id'
-        base = ' AND '.join(where) or '1'
         with closing(self.events()) as db:
-            dates = [{'date': r[0], 'count': r[1]} for r in db.execute(
-                "SELECT date(e.created_at,'+8 hours'),count(*)" + join + ' WHERE ' + base + ' GROUP BY 1 ORDER BY 1 DESC', values)]
+            if kind != 'all':
+                if kind=='unknown':where.append(self.ai_expression + " IN ('unknown','pending')")
+                else:where.append(self.ai_expression + '=?'); values.append(kind)
+            base = ' AND '.join(where) or '1'
+            signature = tuple((p.stat().st_mtime_ns, p.stat().st_size) if p.exists() else None for p in
+                              (self.data/'events.sqlite3',self.data/'events.sqlite3-wal',self.preferences))
+            key = (base,tuple(values),signature)
+            cached = self.date_cache.get(key)
+            if cached and time.monotonic() - cached[0] < 30:
+                dates = cached[1]
+            else:
+                dates = [{'date': r[0], 'count': r[1]} for r in db.execute(
+                    "SELECT date(e.created_at,'+8 hours'),count(*)" + join + ' WHERE ' + base + ' GROUP BY 1 ORDER BY 1 DESC', values)]
+                if len(self.date_cache) > 16: self.date_cache.clear()
+                self.date_cache[key] = (time.monotonic(), dates)
             date = params.get('date', [''])[0]
             if date:
                 start = datetime.strptime(date, '%Y-%m-%d').replace(tzinfo=TAIPEI).astimezone(timezone.utc)
                 where.append('e.created_at>=? AND e.created_at<?')
                 values += [start.isoformat(), (start + timedelta(days=1)).isoformat()]
             filtered = ' AND '.join(where) or '1'
-            total = db.execute('SELECT count(*)' + join + ' WHERE ' + filtered, values).fetchone()[0]
+            total = sum(r['count'] for r in dates if not date or r['date'] == date)
             if before:
                 where.append('e.id<?'); values.append(before)
-            rows = db.execute('SELECT e.id,e.created_at,e.event_type,e.person_detected,e.confidence,e.snapshot_name,coalesce(p.favorite,0) favorite'
+            rows = db.execute('SELECT e.id,e.created_at,e.event_type,e.person_detected,e.confidence,e.snapshot_name,coalesce(p.favorite,0) favorite,'+self.ai_expression+' ai_status'
                 + join + ' WHERE ' + (' AND '.join(where) or '1') + ' ORDER BY e.id DESC LIMIT ?', values + [limit + 1]).fetchall()
         return {'items': self.decorate(rows[:limit]), 'dates': dates, 'total': total,
                 'next_before': str(rows[limit - 1]['id']) if len(rows) > limit else None}
@@ -145,7 +173,7 @@ class Timeline:
             raise ValueError('每次請選取 1–100 個事件')
         ids = list(dict.fromkeys(ids))
         with closing(self.events()) as db:
-            rows = db.execute('SELECT e.id,e.created_at,e.event_type,e.person_detected,e.confidence,e.snapshot_name,coalesce(p.favorite,0) favorite'
+            rows = db.execute('SELECT e.id,e.created_at,e.event_type,e.person_detected,e.confidence,e.snapshot_name,coalesce(p.favorite,0) favorite,'+self.ai_expression+' ai_status'
                 + ' FROM events e LEFT JOIN prefs.favorites p ON p.event_id=e.id WHERE e.id IN (' + ','.join('?' * len(ids)) + ') ORDER BY e.id DESC', ids).fetchall()
         if len(rows) != len(ids):
             raise ValueError('部分事件不存在，請重新整理')
@@ -155,7 +183,7 @@ class Timeline:
         if type(enabled) is not bool:
             raise ValueError('收藏狀態不正確')
         self.selected(ids)
-        with self.lock, closing(self.prefs()) as db, db:
+        with self.lock, media_guard(self.data), closing(self.prefs()) as db, db:
             for event_id in ids:
                 if enabled:
                     db.execute('INSERT OR REPLACE INTO favorites VALUES(?,1)', (event_id,))
@@ -168,17 +196,58 @@ class Timeline:
             raise ValueError('匯出編號不正確')
         return json.loads((self.exports / (token + '.job.json')).read_text())
 
+    def cleanup_exports(self, now=None, locked=False):
+        if not locked and not self.export_lock.acquire(blocking=False):
+            return {'busy':True}
+        try:
+            now = time.time() if now is None else now
+            removed, damaged = 0, 0
+            for old in self.exports.glob('*.job.json'):
+                token = old.name.split('.')[0]
+                if not re.fullmatch(r'[0-9a-f]{32}',token): continue
+                try:
+                    job = json.loads(old.read_text())
+                    if not isinstance(job,dict) or type(job.get('expires_at')) not in (int,float): raise ValueError('invalid job')
+                except (OSError,ValueError):
+                    damaged += 1
+                    try: os.replace(old,old.with_suffix('.invalid'))
+                    except OSError: pass
+                    continue
+                if job.get('expires_at',0) >= now: continue
+                for suffix in ('zip','csv','json','tmp'):
+                    (self.exports/(token+'.data.'+suffix)).unlink(missing_ok=True)
+                old.unlink(missing_ok=True); removed += 1
+            for temporary in self.exports.glob('*.data.tmp'):
+                if temporary.stat().st_mtime < now-3600:
+                    temporary.unlink(missing_ok=True)
+            for artifact in self.exports.glob('*.data.*'):
+                token=artifact.name.split('.')[0]
+                if (re.fullmatch(r'[0-9a-f]{32}',token) and artifact.suffix in ('.zip','.csv','.json')
+                        and not (self.exports/(token+'.job.json')).exists() and artifact.stat().st_mtime < now-86400):
+                    artifact.unlink(missing_ok=True)
+            for invalid in self.exports.glob('*.job.invalid'):
+                if invalid.stat().st_mtime < now-7*86400: invalid.unlink(missing_ok=True)
+            return {'removed':removed,'damaged':damaged}
+        finally:
+            if not locked: self.export_lock.release()
+
     def export(self, ids, format='zip', include_videos=False):
+        if deployment_active():raise RuntimeError('系統更新中，請稍後再匯出。')
         if format not in ('zip', 'csv', 'json') or type(include_videos) is not bool:
             raise ValueError('匯出格式不正確')
         rows = self.selected(ids)
         if not self.export_lock.acquire(blocking=False):
             raise RuntimeError('已有匯出工作進行中，請稍後重試')
+        if deployment_active():
+            self.export_lock.release()
+            raise RuntimeError('系統更新中，請稍後再匯出。')
         token = uuid.uuid4().hex
         job = {'id': token, 'state': 'queued', 'format': format, 'count': len(rows), 'created_at': time.time(), 'expires_at': time.time() + 86400}
         path = self.exports / (token + '.job.json')
         try:
-            atomic_json(path, job)
+            with media_guard(self.data):
+                if deployment_active():raise RuntimeError('系統更新中，請稍後再匯出。')
+                atomic_json(path, job)
         except Exception:
             self.export_lock.release()
             raise
@@ -188,15 +257,7 @@ class Timeline:
             try:
                 job['state'] = 'running'; atomic_json(path, job)
                 # Export copies are reproducible, expire after 24h and share a 4GiB budget.
-                for old in self.exports.glob('*.job.json'):
-                    old_job = json.loads(old.read_text())
-                    if old_job.get('expires_at', 0) < time.time():
-                        old_id = old.name.split('.')[0]
-                        if re.fullmatch(r'[0-9a-f]{32}', old_id):
-                            for suffix in ('zip', 'csv', 'json', 'tmp'):
-                                (self.exports / (old_id + '.data.' + suffix)).unlink(missing_ok=True)
-                        if old.name != path.name:
-                            old.unlink(missing_ok=True)
+                self.cleanup_exports(locked=True)
                 used = sum(p.stat().st_size for p in self.exports.iterdir() if p.is_file())
                 with ExitStack() as stack:
                     files = {}
@@ -221,6 +282,7 @@ class Timeline:
                     estimate = sum(os.fstat(f.fileno()).st_size for f in files.values()) + 4 * 1024 ** 2
                     if estimate > 2 * 1024 ** 3 or used + estimate > 4 * 1024 ** 3 or shutil.disk_usage(self.exports).free < estimate + 1024 ** 3:
                         raise RuntimeError('匯出空間不足或超過 2GiB，請減少選取事件或取消影片')
+                    stack.enter_context(reserve_space(self.state,self.exports,estimate))
                     for row in rows:
                         row['created_at_local'] = datetime.fromisoformat(row['created_at']).astimezone(TAIPEI).isoformat(timespec='seconds')
                     text = io.StringIO(newline='')

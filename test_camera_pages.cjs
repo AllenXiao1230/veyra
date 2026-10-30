@@ -31,11 +31,20 @@ async function test(file,search) {
   document.hidden=false;documentEvents.visibilitychange();await settle();
   assert.equal(calls.length,2,file+' retries aborted list after foreground');
   assert.equal(calls[0].url,calls[1].url,'cursor and filters preserved');
-  const event={id:1,date:'2026-10-30',created_at:'2026-10-29T17:00:00Z',person_detected:false,favorite:false,snapshot_url:null,recordings:[]};
+  const event={id:1,date:'2026-10-30',created_at:'2026-10-29T17:00:00Z',person_detected:false,favorite:false,snapshot_url:'/fixture.jpg',snapshot_name:'fixture.jpg',recordings:[]};
   calls[1].resolve({items:search?[event]:[],dates:[],total:search?1:0,filtered_total:0,trash_count:0,next_before:null});await settle();
   assert.equal(get('libraryContent').attributes['aria-busy'],'false');
   assert.equal(notices.length,0,'background cancellation is not shown as an error');
   if(search) {
+    made.find(n=>n.attributes['aria-label']==='查看事件快照 01:00:00').listeners.click();
+    const preview=made.find(n=>n.attributes['aria-labelledby']==='eventPreviewTitle');
+    const previewBody=preview.querySelector('.preview-content');
+    previewBody.children[0].listeners.error();
+    assert.equal(preview.open,true);
+    assert.equal(previewBody.children[0].attributes.role,'alert','preview error stays in the native dialog');
+    assert.equal(previewBody.children[1].textContent,'重新載入');
+    previewBody.children[1].listeners.click();assert.equal(preview.open,true);
+    preview.close();
     get('selectToggle').listeners.click();get('selectLoaded').listeners.click();
     made.find(n=>n.textContent==='匯出選取').listeners.click();
     const dialog=made.find(n=>n.attributes['aria-labelledby']==='eventExportTitle');

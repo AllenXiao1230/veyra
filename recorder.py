@@ -18,6 +18,8 @@ from camera_state import atomic_json, media_guard
 from camera_http import serve_video
 from camera_storage import media_bytes
 from camera_playback import playback_file
+from camera_sessions import file_states, reconcile_sessions
+from camera_deployment import deployment_active
 from pathlib import Path
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -55,6 +57,13 @@ motion_suppressed = False
 detection_detail = {}
 MIN_FREE_MB = 1024
 MAX_STORAGE_MB = 0
+recording_requested = False
+recording_audio = True
+recording_warning = None
+recovery_after = 0.0
+recovery_attempts = 0
+audio_checked_at = 0.0
+session_recovery_issues = []
 
 
 def load_settings():
@@ -100,7 +109,8 @@ def persist_session(finished=False):
             if not sid:
                 return
             data = {"id": sid, "trigger": recording_trigger, "started_at": session_created_at,
-                    "state": recording_state, "event_ids": list(session_event_ids), "last_error": last_error}
+                    "state": recording_state, "event_ids": list(session_event_ids), "last_error": last_error,
+                    "audio": recording_audio, "warning": recording_warning}
         path = Path(VIDEO_DIR) / "sessions" / (sid + ".json")
         if path.exists():
             previous = json.loads(path.read_text())
@@ -109,6 +119,7 @@ def persist_session(finished=False):
         if finished:
             data["ended_at"] = time.time()
         data["files"] = sorted(p.name for p in Path(VIDEO_DIR).glob(f"recording-*-{sid}.mp4"))
+        data['file_states'] = file_states(VIDEO_DIR, data, active_media)
         with media_guard(VIDEO_DIR):
             atomic_json(path, data)
 
@@ -204,7 +215,11 @@ def watch_progress(proc, ready):
         for line in proc.stdout:
             if line.startswith("out_time_us="):
                 try:
-                    if int(line.split("=", 1)[1]) > 0:
+                    value = int(line.split("=", 1)[1])
+                    if value > getattr(proc, '_camera_out_time', 0):
+                        proc._camera_out_time = value
+                        proc._camera_last_progress = time.monotonic()
+                    if value > 0:
                         ready.set()
                 except ValueError:
                     pass
@@ -221,10 +236,42 @@ def watch_progress(proc, ready):
         proc._camera_log.close()
 
 
-def start_recording(trigger="manual"):
+def audio_available():
+    try:
+        with urllib.request.urlopen('http://127.0.0.1:8094/health', timeout=2) as response:
+            return json.load(response).get('healthy') is True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def start_recording(trigger='manual', _audio=None):
+    global recording_requested, recording_warning
+    with operation_lock:
+        if recorder is not None and recorder.poll() is None:
+            return _start_recording(trigger, recording_audio)
+        audio = audio_available() if _audio is None else _audio
+        previous = recorder
+        try:
+            result = _start_recording(trigger, audio)
+        except RuntimeError:
+            # An inaccessible input fails before optional stream mapping helps.
+            # Only retry a launched audio encoder, never capacity/camera failures.
+            if not audio or recorder is previous or recorder is None:
+                raise
+            result = _start_recording(trigger, False)
+        if result[0]:
+            recording_requested = True
+            recording_warning = None if recording_audio else '音訊暫時不可用，正在錄製純影像；音訊恢復後自動接續。'
+            persist_session()
+        return result
+
+
+def _start_recording(trigger="manual", audio=True):
     global recorder, started_at, last_error, recording_state, recording_trigger
     global active_session_id, session_created_at, session_event_ids
+    global recording_audio
     with operation_lock:
+        if deployment_active():raise RuntimeError('系統更新中，請稍後再啟動錄影。')
         if trigger == "motion" and (not motion_enabled or motion_suppressed):
             return False, "自動觸發已暫停"
         if recorder is not None and recorder.poll() is None:
@@ -243,6 +290,7 @@ def start_recording(trigger="manual"):
             session_created_at = time.time()
             session_event_ids = []
             recording_trigger = trigger
+            recording_audio = audio
             recording_state = "starting"
         # Check that the camera stream is reachable before starting FFmpeg.
         try:
@@ -274,13 +322,13 @@ def start_recording(trigger="manual"):
             "-rw_timeout", "5000000",
             "-i", RECORDING_SOURCE,
 
-            "-thread_queue_size", "512",
+            *(["-thread_queue_size", "512",
             "-rtsp_transport", "tcp",
             "-timeout", "5000000",
-            "-i", AUDIO_SOURCE,
+            "-i", AUDIO_SOURCE] if audio else []),
 
             "-map", "0:v:0",
-            "-map", "1:a:0",
+            *(["-map", "1:a:0"] if audio else []),
 
             # mpjpeg has no reliable frame timestamps; its decoder otherwise
             # invents 25 fps and speeds up a slower live preview.
@@ -290,10 +338,10 @@ def start_recording(trigger="manual"):
             "-qp", "23",
             "-g", "30",
 
-            "-c:a", "aac",
+            *(["-c:a", "aac",
             "-b:a", "96k",
             "-ar", "48000",
-            "-ac", "2",
+            "-ac", "2"] if audio else ["-an"]),
             "-f", "segment",
             "-segment_time", "3600",
             "-segment_atclocktime", "1",
@@ -308,6 +356,7 @@ def start_recording(trigger="manual"):
         recording_state = "starting"
         try:
             with media_guard(VIDEO_DIR):
+                if deployment_active():raise RuntimeError('系統更新中，請稍後再啟動錄影。')
                 recorder = subprocess.Popen(
                     cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=log,
                     start_new_session=True, text=True, bufsize=1
@@ -320,6 +369,12 @@ def start_recording(trigger="manual"):
         recorder._camera_log = log
         recorder._camera_log_start = log_start
         recorder._camera_expected_stop = False
+        recorder._camera_created_at = time.monotonic()
+        recorder._camera_last_progress = time.monotonic()
+        recorder._camera_out_time = 0
+        recorder._camera_growth_at = time.monotonic()
+        recorder._camera_output_bytes = 0
+        recorder._camera_output_sizes = {}
         persist_session()
         ready = threading.Event()
         recorder._camera_watcher = threading.Thread(target=watch_progress, args=(recorder, ready), daemon=True)
@@ -348,9 +403,16 @@ def start_recording(trigger="manual"):
         return True, "錄影已啟動"
 
 
-def stop_recording():
+def stop_recording(preserve_intent=False):
     global recorder, started_at, last_error, recording_state
+    global recording_requested
+    if not preserve_intent:
+        with lock:
+            recording_requested = False
     with operation_lock:
+        if not preserve_intent:
+            with lock:
+                recording_requested = False
         proc = recorder
         if proc is None or proc.poll() is not None:
             is_recording()
@@ -391,6 +453,74 @@ def stop_recording():
             last_error = None
         persist_session(finished=True)
         return True, "錄影已停止"
+
+
+def encoder_status(now=None):
+    now = time.monotonic() if now is None else now
+    proc = recorder
+    if proc is None or type(getattr(proc, '_camera_created_at', None)) not in (int, float):
+        return {'healthy': not recording_requested, 'progress_age_seconds': None, 'stalled': False}
+    progress = now - proc._camera_last_progress
+    growth = now - proc._camera_growth_at
+    stalled = proc.poll() is None and recording_state == 'recording' and (progress > 20 or growth > 30)
+    return {'healthy': proc.poll() is None and not stalled, 'stalled': stalled,
+            'progress_age_seconds': round(progress, 2), 'growth_age_seconds': round(growth, 2),
+            'output_bytes': proc._camera_output_bytes, 'out_time_us': proc._camera_out_time}
+
+
+def check_encoder():
+    global recovery_after, recovery_attempts, audio_checked_at, recording_warning
+    with operation_lock:
+        proc = recorder
+        if not recording_requested:
+            return
+        now = time.monotonic()
+        if (recording_trigger == 'motion' and not motion_detected and not motion_error and last_motion_at
+                and last_frame_tick and now-last_frame_tick < 3 and now-last_motion_at >= MOTION_STOP_DELAY):
+            stop_recording()
+            return
+        if proc is not None:
+            names = list(Path(VIDEO_DIR).glob(f'recording-*-{active_session_id}.mp4'))
+            sizes = {}
+            for path in names:
+                try:
+                    info=path.stat(); sizes[(info.st_dev,info.st_ino)]=info.st_size
+                except FileNotFoundError: continue
+            previous=getattr(proc,'_camera_output_sizes',{})
+            if any(size > previous.get(identity,0) for identity,size in sizes.items()):
+                proc._camera_growth_at = now
+            proc._camera_output_bytes = sum(sizes.values())
+            proc._camera_output_sizes = sizes
+        state = encoder_status(now)
+        restore_audio = False
+        if not recording_audio and now - audio_checked_at >= 60:
+            audio_checked_at = now
+            restore_audio = audio_available()
+        broken = proc is None or proc.poll() is not None or state['stalled']
+        if not broken and not restore_audio:
+            if now - getattr(proc, '_camera_created_at', now) > 60:
+                recovery_attempts = 0
+            persist_session()
+            return
+        if now < recovery_after:
+            return
+        trigger, remembered = recording_trigger, list(session_event_ids)
+        reason = '音訊已恢復，接續錄製' if restore_audio else '錄影輸出停止，正在恢復'
+        recording_warning = reason
+        stop_recording(preserve_intent=True)
+        # Manual stop cancels intent before waiting on this operation lock.
+        if not recording_requested:
+            return
+        recovery_attempts += 1
+        recovery_after = now + min(300, 5 * 2 ** min(recovery_attempts, 6))
+        try:
+            start_recording(trigger, _audio=True if restore_audio else False)
+            for identifier in remembered[-1:]:
+                if identifier not in session_event_ids:
+                    session_event_ids.append(identifier)
+            persist_session()
+        except Exception as error:
+            recording_warning = '錄影恢復失敗，稍後重試：' + str(error)[-160:]
 
 
 def list_recordings():
@@ -478,11 +608,17 @@ class Handler(BaseHTTPRequestHandler):
             with lock:
                 active = is_recording()
                 fresh = bool(last_frame_tick and time.monotonic() - last_frame_tick < 15)
-                healthy = fresh and recording_state != "failed"
+                output = encoder_status()
+                healthy = fresh and recording_state != "failed" and output['healthy']
                 self.send_json(503 if path == "/health" and not healthy else 200, {
                     "recording": active,
                     "recording_state": recording_state,
                     "healthy": healthy,
+                    "encoder": output,
+                    "audio_included": recording_audio if active else None,
+                    "warning": recording_warning,
+                    "recovery_attempts": recovery_attempts,
+                    "session_recovery_issues": session_recovery_issues,
                     "last_error": last_error,
                     "motion_error": motion_error,
                     "frame_age_seconds": round(time.monotonic() - last_frame_tick, 2) if last_frame_tick else None,
@@ -630,6 +766,8 @@ def motion_detector_worker():
                 capacity_checked = time.monotonic()
                 if is_recording() and storage_exhausted():
                     background_action(check_recording_capacity)
+                elif recording_requested:
+                    background_action(check_encoder)
             with urllib.request.urlopen("http://127.0.0.1:8092/status", timeout=3) as response:
                 state = json.load(response)
             now = time.monotonic()
@@ -686,6 +824,19 @@ def motion_detector_worker():
             time.sleep(1)
 
 
+def session_recovery_worker():
+    global session_recovery_issues
+    while True:
+        time.sleep(60)
+        if recording_requested:continue
+        def reconcile():
+            global session_recovery_issues
+            session_recovery_issues=reconcile_sessions(VIDEO_DIR,inspect_recording,
+                skip=lambda sid:sid==active_session_id and (recording_state=='starting' or
+                    (recorder is not None and recorder.poll() is None)),limit=3)
+        background_action(reconcile)
+
+
 def graceful_shutdown(signum, frame):
     """服務關閉或重啟時，先讓 FFmpeg 正常完成 MP4 封裝。"""
     print(f"[shutdown] received signal {signum}; stopping recorder", flush=True)
@@ -701,6 +852,7 @@ if __name__ == "__main__":
     os.makedirs(VIDEO_DIR, exist_ok=True)
     load_settings()
     media_library()
+    session_recovery_issues = reconcile_sessions(VIDEO_DIR, inspect_recording)
 
     signal.signal(signal.SIGTERM, graceful_shutdown)
     signal.signal(signal.SIGINT, graceful_shutdown)
@@ -715,5 +867,6 @@ if __name__ == "__main__":
         name="camera-motion-detector",
         daemon=True,
     ).start()
+    threading.Thread(target=session_recovery_worker,name='session-recovery',daemon=True).start()
 
     server.serve_forever()

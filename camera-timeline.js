@@ -11,7 +11,7 @@
   const favoriteFilter = ui.element('button', 'quiet', '只看收藏');
   favoriteFilter.type = 'button'; favoriteFilter.setAttribute('aria-pressed','false');
   const type = ui.element('select'); type.setAttribute('aria-label','事件分類');
-  for(const [value,label] of [['all','全部事件'],['person','AI 標註有人'],['motion','其他動作']]) {
+  for(const [value,label] of [['all','全部事件'],['person','AI 標註有人'],['motion','其他動作'],['unknown','AI 未完成']]) {
     const option = ui.element('option','',label); option.value = value; type.append(option);
   }
   $('mediaDate').parentElement.append(type);
@@ -33,7 +33,12 @@
     media.src = video ? video.playback_url : row.snapshot_url;
     if(video) {media.controls = true;media.playsInline = true;media.preload = 'metadata';}
     else media.alt = '事件快照 ' + ui.time(row.created_at);
-    media.addEventListener('error',()=>ui.toast('無法預覽，請重開或下載原檔。'));
+    media.addEventListener('error',()=>{
+      const error=ui.element('p','notice','無法預覽，請重試或下載原檔。');error.setAttribute('role','alert');
+      const retry=ui.element('button','','重新載入');retry.type='button';retry.addEventListener('click',()=>{preview.close();open(row,video);});
+      preview.querySelector('.preview-content').replaceChildren(error,retry);
+      if(video){media.pause();media.removeAttribute('src');media.load();}
+    },{once:true});
     preview.querySelector('.preview-content').append(media);
     preview.querySelector('a').href = video ? video.url : row.snapshot_url;
     preview.showModal(); if(video) media.play().catch(()=>{});
@@ -65,10 +70,10 @@
         image.addEventListener('error',()=>{image.remove();thumb.append(ui.element('span','','查看快照'));},{once:true});
         image.src='/ai-api/thumbnail/' + encodeURIComponent(row.snapshot_name);thumb.append(image); thumb.addEventListener('click',()=>open(row));
       } else {thumb.textContent='快照已移除';thumb.disabled=true;}
-      const copy = ui.element('div','event-copy'); copy.append(ui.element('strong','',row.person_detected ? '動作 · AI 標註有人' : '偵測到動作'));
+      const copy = ui.element('div','event-copy'); copy.append(ui.element('strong','',row.person_detected ? '動作 · AI 標註有人' : row.ai_status==='pending' ? '動作 · AI 分析中' : row.ai_status==='unknown' ? '動作 · AI 未完成' : '偵測到動作'));
       const links = ui.element('div','event-links');
       for(const video of row.recordings) {
-        const button = ui.element('button','quiet',video.complete ? '播放相關錄影' : '相關錄影錄製中');button.type='button';button.disabled=!video.complete;
+        const button = ui.element('button','quiet',video.complete ? '播放相關錄影' : video.state==='damaged' ? '相關錄影需修復' : video.state==='unknown' ? '相關錄影待驗證' : '相關錄影錄製中');button.type='button';button.disabled=!video.complete;
         button.addEventListener('click',()=>open(row,video));links.append(button);
       }
       if(!row.recordings.length) links.append(ui.element('span','muted','無相關錄影'));

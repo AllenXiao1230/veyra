@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#101216"><title>備份管理 · Camera Monitor</title>
-  <link rel="stylesheet" href="/camera-ui.css?v=mobile1">
-  <script src="/camera-ui.js?v=mobile1" defer></script>
-  <script src="/camera-backups.js?v=mobile1" defer></script>
+  <link rel="stylesheet" href="/camera-ui.css?v=reliability1">
+  <script src="/camera-ui.js?v=reliability1" defer></script>
+  <script src="/camera-backups.js?v=reliability1" defer></script>
 </head>
 <body data-page="backups">
   <header class="app-header" id="appHeader"></header>
@@ -13,6 +13,8 @@
     <div class="page-heading"><div class="heading-label"><h1>備份管理</h1><span class="count" id="backupCount">讀取中</span></div><button id="backupCreate" class="primary" type="button" disabled><span data-icon="download"></span>立即備份</button></div>
     <p class="notice" id="backupRisk" hidden>目前為同磁碟的本機備份，無法防護整顆磁碟故障。</p>
     <div class="backup-capacity" id="backupCapacity"><span id="backupFree">正在讀取容量…</span><span id="backupUsage"></span></div>
+    <p class="notice" id="systemIssues" role="status" hidden></p>
+    <details class="storage-details"><summary>儲存與服務狀態</summary><p class="muted" id="storageChecked">正在讀取…</p><dl id="storageBreakdown"></dl><p class="muted" id="diagnosticScope"></p></details>
     <section class="backup-job" id="backupJob" aria-labelledby="backupJobTitle" hidden>
       <div class="backup-job-heading"><h2 id="backupJobTitle">備份工作</h2><span class="status" id="backupJobState" role="status"></span></div>
       <p id="backupJobMessage"></p><progress id="backupProgress" aria-label="備份工作進度"></progress>

@@ -39,6 +39,12 @@ class HybridTests(unittest.TestCase):
         rec.motion_suppressed = False
         rec.motion_error = None
         rec.motion_detected = False
+        rec.recording_requested = False
+        rec.recording_warning = None
+        rec.recording_audio = True
+        rec.recovery_after = 0
+        rec.recovery_attempts = 0
+        rec.audio_checked_at = time.monotonic()
 
     def tearDown(self):
         self.video_patch.stop()

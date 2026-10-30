@@ -140,9 +140,10 @@
       $("recordToggle").innerHTML = ui.icon(active ? "stop" : "record") + `<span>${active ? "停止錄影" : "開始錄影"}</span>`;
       if (transitioning) $("recordToggle").textContent = state.recording_state === "starting" ? "啟動中…" : "停止中…";
     }
-    $("recordWarning").hidden = !(state.last_error || state.motion_error);
+    if(state.encoder?.stalled){$('recordStatus').dataset.state='error';$('recordStatus').lastElementChild.textContent='錄影輸出停止，正在恢復';}
+    $("recordWarning").hidden = !(state.last_error || state.motion_error || state.warning);
     $("recordWarning").textContent = state.last_error ?
-      (/8554|audio|音訊|404/.test(state.last_error) ? "音訊尚未就緒，錄影無法啟動。請到設定檢查麥克風或重啟音訊。" : "錄影失敗，請稍後重試或檢查服務狀態。") : state.motion_error ? (active ? "動作偵測暫時中斷，持續錄影並等待恢復。" : "動作偵測暫時無法使用，請檢查服務狀態。") : "";
+      "錄影暫時失敗，請查看儲存與服務狀態或稍後重試。" : state.motion_error ? (active ? "動作偵測暫時中斷，持續錄影並等待恢復。" : "動作偵測暫時無法使用，請檢查服務狀態。") : state.warning || "";
   }
   window.addEventListener("camera-recorder", event => recorderState(event.detail));
   window.addEventListener("camera-recorder-unavailable", () => {

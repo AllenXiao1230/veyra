@@ -135,6 +135,20 @@
     updating = true;
     try {
       const data = await api("/status");
+      const labels={recordings:'錄影',snapshots:'快照',snapshot_trash:'快照回收桶',recording_trash:'錄影回收桶',backups:'備份與備份回收桶',exports:'事件匯出',recoveries:'隔離還原',playback_cache:'播放暫存'};
+      if(data.storage?.checked_at){
+        $('storageChecked').textContent='更新於 '+ui.dateTime(data.storage.checked_at)+(data.storage.recording_days_estimate!==null&&data.storage.recording_days_estimate!==undefined ? ' · 依目前增長估計可錄 '+data.storage.recording_days_estimate+' 天' : '');
+        if($('storageBreakdown').dataset.checked!==String(data.storage.checked_at)){
+          $('storageBreakdown').replaceChildren();
+          for(const [key,value] of Object.entries(data.storage.categories||{}))$('storageBreakdown').append(ui.element('dt','',labels[key]||key),ui.element('dd','',ui.size(value.physical_bytes)));
+          $('storageBreakdown').dataset.checked=String(data.storage.checked_at);
+        }
+      }
+      const diagnostics=data.diagnostics;
+      const issues=diagnostics?.issues||[];
+      $('systemIssues').hidden=!issues.length;
+      $('systemIssues').textContent=issues.map(i=>i.message).join('；');
+      $('diagnosticScope').textContent=diagnostics?.checked_at ? '檢查於 '+ui.dateTime(diagnostics.checked_at)+'；本機下載路徑'+(diagnostics.entrypoint?.healthy?'正常':'待檢查')+'。遠端網路需另行驗證。' : '服務診斷尚未完成。';
       const firstStatus = !statusLoaded;
       statusLoaded = true;
       $("backupRisk").hidden = !data.same_device;

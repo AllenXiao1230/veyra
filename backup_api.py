@@ -22,6 +22,8 @@ from camera_state import atomic_json
 from camera_storage import backup_policy, save_backup_policy
 from camera_timeline import Timeline
 from camera_media import send_file
+from camera_storage import storage_summary
+from camera_diagnostics import PROBE, read_state
 
 
 class Jobs:
@@ -158,6 +160,12 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         jobs, store = self.server.jobs, self.server.jobs.store
         try:
+            if path == '/probe':
+                send_file(self,store.state/'transport-probe.bin')
+                return
+            if path == '/storage':
+                self.send_json(200,read_state(store.state/'storage-summary.json',{'pending':True}))
+                return
             if path.startswith('/events/'):
                 timeline = self.server.timeline
                 if path == '/events/list':
@@ -181,6 +189,8 @@ class Handler(BaseHTTPRequestHandler):
                 disk = shutil.disk_usage(store.root)
                 data_disk = shutil.disk_usage(maintenance.DATA)
                 self.send_json(200, {"healthy": True, "jobs": jobs.recent(), "backup_root": str(store.root),
+                                     'diagnostics':read_state(store.state/'status.json'),
+                                     'storage':read_state(store.state/'storage-summary.json',{'pending':True}),
                                      "external_configured": False,
                                      "same_device": store.root.stat().st_dev == maintenance.DATA.stat().st_dev,
                                      "free_bytes": disk.free, "total_bytes": disk.total,
@@ -233,13 +243,27 @@ def main():
     server.daemon_threads = True
     server.jobs = Jobs(store)
     server.timeline = Timeline(maintenance.DATA, maintenance.RECORDINGS, maintenance.STATE)
+    probe = store.state/'transport-probe.bin'
+    probe.write_bytes(PROBE); probe.chmod(0o600)
+    maintenance_stop = threading.Event()
+    def maintain():
+        while not maintenance_stop.is_set():
+            try:
+                server.timeline.cleanup_exports()
+                atomic_json(store.state/'storage-summary.json',storage_summary(maintenance.DATA,maintenance.RECORDINGS,store.root,store.state))
+            except Exception:
+                logging.exception('Derived storage maintenance failed')
+            maintenance_stop.wait(60)
+    threading.Thread(target=maintain,name='storage-maintenance',daemon=True).start()
     def stop(*args):
+        maintenance_stop.set()
         threading.Thread(target=server.shutdown, daemon=True).start()
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     try:
         server.serve_forever(poll_interval=0.5)
     finally:
+        maintenance_stop.set()
         server.server_close()
         # Jobs hold the maintenance lock until their durable result is saved.
         if server.jobs.lock.acquire(timeout=3500):
