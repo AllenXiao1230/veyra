@@ -60,7 +60,9 @@ tuning1 沿用上述六項服務與入口。`app/common/camera_motion.py` 驗證
 
 `web/camera-connection.js` 只在首頁可見期間每 5 秒探測現有 `/ai-api/status`，保留近 5 分鐘最多 60 筆 HTTP 觀測；不是另一項服務或歷史 SLA。音畫發布保留 JPEG wallclock、麥克風 RTP clock 與正規化起點；`POST /stream-api/restart` 只要求整合發布器重建，不重啟錄影／麥克風。前端仍由原三頁、共用設定與實際媒體網格／清單組成。
 
-現役清單為 `camera-monitor-tuning1-manifest.json`，86 個映射檔案加 `app/management/current-release.json` 共 87。精確 commit、CI 及最終文件／部署核對見本版交付紀錄。
+pagesize1 僅擴充既有快照／錄影前端工具列，沒有新增服務、API 或伺服器設定；每頁偏好保存在瀏覽器 localStorage，依 `snapshots`／`recordings` 分開，不放在伺服器資料目錄。
+
+現役清單為 `camera-monitor-pagesize1-manifest.json`，86 個映射檔案加 `app/management/current-release.json` 共 87。精確 commit、CI 及最終文件／部署核對見本版交付紀錄。
 
 ## 系統入口與相容路徑
 
@@ -78,7 +80,7 @@ systemd 需在 `/etc/systemd/system/` 及使用者的 systemd 設定目錄註冊
 cd /srv/camera-monitor/source
 sudo /srv/camera-monitor/bin/camera-maintenance check
 sudo /srv/camera-monitor/bin/camera-maintenance backup
-sudo python3 preflight.py --stage . --manifest camera-monitor-tuning1-manifest.json
+sudo python3 preflight.py --stage . --manifest camera-monitor-pagesize1-manifest.json
 ```
 
 新備份 configuration.tar.gz 封存實際的 app／config／web／bin／vendor，避免只備份系統入口連結。媒體與資料庫仍由既有一致性備份流程處理；不遞迴備份 backups、archive 或自己。驗證器同時支援搬移前的 `opt/camera-ai/...` 與新 `srv/camera-monitor/app/ai/...` 封存格式，舊備份不改寫。

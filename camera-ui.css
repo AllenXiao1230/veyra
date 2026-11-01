@@ -369,3 +369,10 @@ textarea { font:inherit; color:var(--text); background:var(--surface); border:1p
   .library-list .media-filename { grid-column:1/-1; }
   .library-list .media-actions { justify-content:flex-start; }
 }
+
+.library-toolbar .page-size { flex:0 0 auto; flex-wrap:nowrap; }
+.library-toolbar .page-size label { display:block; margin-right:0; white-space:nowrap; }
+.library-toolbar .page-size select { width:auto; min-height:44px; }
+@media (max-width:600px) {
+  .library-toolbar .page-size select { font-size:16px; }
+}

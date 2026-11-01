@@ -6,13 +6,15 @@
 
 ## 目前發版清單
 
-在來源根目錄執行 `python3 release_manifest.py --release camera-monitor-tuning1 --output camera-monitor-tuning1-manifest.json`，可建立所有現役映射的 SHA-256。`tuning1` 為目前完整清單；86 個映射檔案，另有 `current-release.json`，共 87 個檔案。重新產生清單不等於已部署，來源或文件更新後必須重新核對；精確 commit、CI 與最終文件／部署核對以本版交付紀錄為準。歷版 manifest 保留作歷史，已退役的音訊 readiness override、HLS light build 與舊授權檔名不重裝。
+在來源根目錄執行 `python3 release_manifest.py --release camera-monitor-pagesize1 --output camera-monitor-pagesize1-manifest.json`，可建立所有現役映射的 SHA-256。`pagesize1` 為目前完整清單；86 個映射檔案，另有 `current-release.json`，共 87 個檔案。重新產生清單不等於已部署，來源或文件更新後必須重新核對；精確 commit、CI 與最終文件／部署核對以本版交付紀錄為準。歷版 manifest 保留作歷史，已退役的音訊 readiness override、HLS light build 與舊授權檔名不重裝。
 
 安裝器只替換不同雜湊的程式／設定、只重啟受影響服務；不再遞迴 chown 錄影。部署期間拒絕新錄影與匯出，等待中的備份／清理鎖會使部署安全拒絕。已有錄影或匯出時須待其完成，不能用部署強行中斷工作。
 
 完成後 `/srv/camera-monitor/app/management/current-release.json` 是本次完整清單；每版程式／設定的回滾位於 `/srv/camera-monitor/backups/releases/`。清單不是備份，也不包含日後變動的使用者設定與媒體。
 
 tuning1 基準程式回滾包為 `/srv/camera-monitor/backups/releases/camera-monitor-tuning1-20261102-002816`。01:23:52 最後修正麥克風 RTP clock 的部署只重啟整合串流；音訊輸入不再使用抵達 wallclock，JPEG wallclock 與正規化起點保留。恢復舊程式可能重新引入已修正的間歇靜音，回滾後應核對實際版本與輸出，不將程式回滾視為音訊驗收。
+
+pagesize1 的「每頁顯示」偏好只存在目前瀏覽器 localStorage，依快照／錄影分開；伺服器備份或隔離還原不會保存或恢復這份瀏覽器偏好。沒有有效保存值時回到自動（載入時 ≤600px 為 12 項，其餘 24 項），也可在頁面重新選擇；儲存不可用時目前頁面仍可使用。
 
 ## 乾淨主機恢復流程
 

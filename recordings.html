@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#101216"><title>錄影 · Camera Monitor</title>
-  <link rel="stylesheet" href="/camera-ui.css?v=tuning1">
-  <script src="/camera-ui.js?v=tuning1" defer></script>
-  <script src="/camera-center.js?v=tuning1" defer></script>
-  <script src="/camera-library.js?v=tuning1" defer></script>
+  <link rel="stylesheet" href="/camera-ui.css?v=pagesize1">
+  <script src="/camera-ui.js?v=pagesize1" defer></script>
+  <script src="/camera-center.js?v=pagesize1" defer></script>
+  <script src="/camera-library.js?v=pagesize1" defer></script>
 </head>
 <body data-page="recordings">
   <header class="app-header" id="appHeader"></header>
@@ -14,6 +14,7 @@
     <div class="page-heading"><div class="heading-label"><h1 id="libraryTitle">錄影</h1><span id="libraryCount" class="count" role="status">讀取中</span></div><button id="trashToggle" class="quiet" type="button"><span data-icon="trash"></span><span>回收桶</span></button></div>
     <div class="library-toolbar">
       <div class="filter-group"><label for="mediaDate">日期</label><select id="mediaDate"><option value="">全部日期</option></select></div>
+      <div class="filter-group page-size"><label for="mediaPageSize">每頁顯示</label><select id="mediaPageSize"><option value="auto">自動</option><option value="12">12 項</option><option value="24">24 項</option><option value="48">48 項</option><option value="96">96 項</option></select></div>
       <div class="toolbar-actions"><button id="selectToggle" type="button">選取</button><button id="libraryRefresh" type="button" aria-label="重新整理錄影"><span data-icon="refresh"></span><span class="optional-label">重新整理</span></button></div>
     </div>
     <div id="selectionBar" class="selection-bar" hidden><span id="selectionCount">已選取 0 部</span><button id="selectLoaded" class="quiet" type="button">全選已載入</button><button id="deleteSelected" class="danger" type="button" disabled>刪除</button></div>

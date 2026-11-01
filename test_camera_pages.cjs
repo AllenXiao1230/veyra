@@ -7,7 +7,7 @@ async function test(file,search) {
       classList:{toggle(){}},addEventListener(type,fn){this.listeners[type]=fn;},
       setAttribute(key,value){this.attributes[key]=value;},getAttribute(key){return this.attributes[key];},
       append(...items){if(this.tag==='select'&&!this.children.length&&items.length)this.value=items[0].value;this.children.push(...items);},
-      prepend(){},before(){},after(){},focus(){},
+      prepend(){},before(){},after(){},focus(){},scrollIntoView(){},
       replaceChildren(...items){this.children=[];this.append(...items);},
       get firstElementChild(){return this.children[0];},
       get parentElement(){return this.parent||(this.parent=node());},
@@ -20,7 +20,7 @@ async function test(file,search) {
   document.body.dataset.page='snapshots';
   const ui={element:(tag,cls,text)=>{const value=Object.assign(node(tag),{className:cls,textContent:text||''});made.push(value);return value;},
     button:(label)=>{const value=node('button');value.label=label;made.push(value);return value;},
-    time:()=>'01:00:00',day:()=>'2026/10/30',dateTime:()=>'2026/10/30 01:00:00',size:()=>'3 B',icon:()=>'',backdrop(){},toast:message=>notices.push(message),
+    pageSize:()=>get('mediaPageSize').value||'12',time:()=>'01:00:00',day:()=>'2026/10/30',dateTime:()=>'2026/10/30 01:00:00',size:()=>'3 B',icon:()=>'',backdrop(){},toast:message=>notices.push(message),
     api:(url,payload,timeout,signal)=>new Promise((resolve,reject)=>{calls.push({url,resolve,reject,payload});signal?.addEventListener('abort',()=>reject(new Error('cancelled')));})};
   const context={window:{CameraUI:ui,matchMedia:()=>({matches:true}),addEventListener:(type,fn)=>windowEvents[type]=fn},document,
     location:{search},URLSearchParams,AbortController,sessionStorage:{getItem:()=>null},setTimeout,clearTimeout,console};
@@ -32,9 +32,16 @@ async function test(file,search) {
   assert.equal(calls.length,2,file+' retries aborted list after foreground');
   assert.equal(calls[0].url,calls[1].url,'cursor and filters preserved');
   const event={id:1,date:'2026-10-30',created_at:'2026-10-29T17:00:00Z',person_detected:false,favorite:false,snapshot_url:'/fixture.jpg',snapshot_name:'fixture.jpg',recordings:[]};
-  calls[1].resolve({items:search?[event]:[],dates:[],total:search?1:0,filtered_total:0,trash_count:0,next_before:null});await settle();
+  calls[1].resolve({items:search?[event]:[],dates:[],total:search?1:0,filtered_total:0,trash_count:0,next_before:"older"});await settle();
   assert.equal(get('libraryContent').attributes['aria-busy'],'false');
   assert.equal(notices.length,0,'background cancellation is not shown as an error');
+  get('loadMore').listeners.click();await settle();
+  assert.equal(new URLSearchParams(calls.at(-1).url.split('?')[1]).get('before'),'older');
+  get('mediaPageSize').value='48';get('mediaPageSize').listeners.change();await settle();
+  const resized=new URLSearchParams(calls.at(-1).url.split('?')[1]);
+  assert.equal(resized.get('limit'),'48','changed page size reaches server');
+  assert.equal(resized.has('before'),false,'page size resets cursor while old request is pending');
+  calls.at(-1).resolve({items:search?[event]:[],dates:[],total:search?1:0,filtered_total:0,trash_count:0,next_before:null});await settle();
   if(search) {
     made.find(n=>n.attributes['aria-label']==='查看事件快照 01:00:00').listeners.click();
     const preview=made.find(n=>n.attributes['aria-labelledby']==='eventPreviewTitle');
@@ -54,6 +61,7 @@ async function test(file,search) {
     assert.ok(made.some(n=>n.className==='dialog-error'&&!n.hidden&&n.textContent.includes('fixture export failure')));
   } else {
     get('trashToggle').listeners.click();
+    assert.equal(new URLSearchParams(calls.at(-1).url.split('?')[1]).get('limit'),'48','trash uses selected page size');
     calls.at(-1).resolve({items:[{token:'a'.repeat(32),filename:'event-test.jpg',deleted_at:'2026-10-29T17:00:00Z',size:3}],total:1,next_before:null});await settle();
     get('selectToggle').listeners.click();get('selectLoaded').listeners.click();get('deleteSelected').listeners.click();
     const input=made.find(n=>n.placeholder==='輸入「永久刪除」');

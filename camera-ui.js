@@ -24,6 +24,20 @@
   const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.image}</svg>`;
   const $ = id => document.getElementById(id);
   const page = document.body.dataset.page;
+  const pageSizeControl = $('mediaPageSize');
+  const pageSizes = ['12', '24', '48', '96'];
+  const defaultPageSize = window.matchMedia('(max-width:600px)').matches ? '12' : '24';
+  const pageSizeKey = 'camera.library.pageSize.' + page;
+  const pageSize = () => pageSizes.includes(pageSizeControl?.value) ? pageSizeControl.value : defaultPageSize;
+  if (pageSizeControl) {
+    let saved = 'auto';
+    try { saved = localStorage.getItem(pageSizeKey) || 'auto'; } catch (_) {}
+    pageSizeControl.value = pageSizes.includes(saved) ? saved : 'auto';
+    pageSizeControl.firstElementChild.textContent = `自動（${defaultPageSize} 項）`;
+    pageSizeControl.addEventListener('change', () => {
+      try { localStorage.setItem(pageSizeKey, pageSizeControl.value); } catch (_) {}
+    });
+  }
   $('mediaDate')?.setAttribute('aria-label','日期');
   document.querySelectorAll('.view-switch a').forEach(link => {
     const target = new URL(link.href);
@@ -340,7 +354,7 @@
   const timeFormat = new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Taipei',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
   const dateFormat = new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
   const dayFormat = new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Taipei',year:'numeric',month:'long',day:'numeric',weekday:'short'});
-  window.CameraUI = {api, icon, element, button, backdrop, toast, sourceLabel, preferences: () => preferences, poll,
+  window.CameraUI = {api, icon, pageSize, element, button, backdrop, toast, sourceLabel, preferences: () => preferences, poll,
     setRecorder: state => { lastRecorder = state; window.dispatchEvent(new CustomEvent("camera-recorder", {detail: state})); },
     audio: () => lastAudio, recorder: () => lastRecorder,
     time: value => timeFormat.format(new Date(value)),

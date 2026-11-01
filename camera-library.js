@@ -334,13 +334,13 @@
     let additions = null;
     try {
       if (trashMode) {
-        const params = new URLSearchParams({limit:'24'}); if(cursor) params.set('before',cursor);
+        const params = new URLSearchParams({limit:ui.pageSize()}); if(cursor) params.set('before',cursor);
         const result = await ui.api(base + '/trash?' + params,undefined,30000,request.signal);
         if (currentGeneration !== generation || document.hidden) return;
         items = result.items;
         total = trashCount = result.total; next = result.next_before;
       } else {
-        const params = new URLSearchParams({limit: window.matchMedia('(max-width:600px)').matches ? '12' : '24'});
+        const params = new URLSearchParams({limit: ui.pageSize()});
         if ($("mediaDate").value) params.set("date", $("mediaDate").value);
         if (cursor) params.set("before", cursor);
         const result = await ui.api(base + "/library?" + params, undefined, 30000, request.signal);
@@ -370,6 +370,7 @@
     }
   }
   $("mediaDate").addEventListener("change", () => { selectionMode = false; load(true); });
+  $('mediaPageSize').addEventListener('change', () => load(true));
   $("libraryRefresh").addEventListener("click", () => load(true));
   $("loadMore").addEventListener("click", () => load(false));
   $("trashToggle").addEventListener("click", () => { trashMode = !trashMode; selectionMode = false; items = []; load(true); });

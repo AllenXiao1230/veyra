@@ -124,7 +124,7 @@
     if(direction==='reset'){rows=[];$('libraryContent').replaceChildren(ui.element('p','muted','正在讀取事件…'));$('libraryCount').textContent='讀取中';}
     previous.disabled=$('loadMore').disabled=true;
     try {
-      const params = new URLSearchParams({limit:window.matchMedia('(max-width:600px)').matches?'12':'24',type:type.value});
+      const params = new URLSearchParams({limit:ui.pageSize(),type:type.value});
       if(cursor)params.set('before',cursor);if($('mediaDate').value||initialDate)params.set('date',$('mediaDate').value||initialDate);
       for(const [key,value] of Object.entries(applied))if(value&&value!=='all'&&value!=='newest')params.set(key,value);
       if(favoriteFilter.getAttribute('aria-pressed')==='true')params.set('favorite','1');
@@ -181,6 +181,7 @@
   });
   $('mediaDate').addEventListener('change',()=>{initialDate='';load();});type.addEventListener('change',()=>load());
   favoriteFilter.addEventListener('click',()=>{favoriteFilter.setAttribute('aria-pressed',String(favoriteFilter.getAttribute('aria-pressed')!=='true'));load();});
+  $('mediaPageSize').addEventListener('change',()=>load());
   $('libraryRefresh').addEventListener('click',()=>load());$('loadMore').addEventListener('click',()=>load('next'));previous.addEventListener('click',()=>load('previous'));
   $('selectToggle').addEventListener('click',()=>{selecting=!selecting;selected.clear();selection();});
   $('selectLoaded').addEventListener('click',()=>{rows.forEach(r=>selected.add(r.id));selection();});
