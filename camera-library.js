@@ -8,6 +8,13 @@
   const unit = isRecording ? "部" : "張";
   const base = isRecording ? "/recordings-api" : "/ai-api";
   const content = $("libraryContent");
+  const views=ui.element('div','view-switch library-views');views.setAttribute('aria-label','媒體呈現方式');
+  const gridView=ui.element('button','','網格'),listView=ui.element('button','','清單');
+  gridView.type=listView.type='button';views.append(gridView,listView);
+  document.querySelector('.library-toolbar').append(views);
+  let layout='grid';try{layout=localStorage.getItem('camera.library.'+document.body.dataset.page)==='list'?'list':'grid';}catch(_){}
+  function setLayout(value){layout=value;content.classList.toggle('library-list',value==='list');gridView.setAttribute('aria-pressed',String(value==='grid'));listView.setAttribute('aria-pressed',String(value==='list'));try{localStorage.setItem('camera.library.'+document.body.dataset.page,value);}catch(_){}}
+  gridView.addEventListener('click',()=>setLayout('grid'));listView.addEventListener('click',()=>setLayout('list'));setLayout(layout);
   let items = [];
   let dates = [];
   let selected = new Set();
@@ -200,14 +207,14 @@
     }
     imageButton.append(placeholder);
     if (isRecording && item.duration_seconds) imageButton.append(ui.element("span", "duration", duration(item.duration_seconds)));
+    if(isRecording&&item.playable){const play=ui.element('span','media-play');play.innerHTML=ui.icon('play');imageButton.append(play);}
     if (isRecording && item.filename.endsWith(".mkv")) imageButton.append(ui.element("span", "media-badge", "MKV"));
-    if (item.active) imageButton.append(ui.element("span", "media-badge", "錄影中"));
     const meta = ui.element("div", "media-meta");
     const details = ui.element("div");
     const time = ui.element("time", "media-time", ui.time(item.created_at));
     time.dateTime = item.created_at;
     details.append(time);
-    if (isRecording) details.append(ui.element("p", "media-size", ui.size(item.size)));
+    if (isRecording) details.append(ui.element("p", "media-size", (item.duration_seconds?duration(item.duration_seconds)+' · ':'')+ui.size(item.size)));
     if (isRecording && item.trigger) details.append(ui.element("p", "media-size", item.trigger === "motion" ? "動作觸發" : "手動錄影"));
     if (!isRecording && item.ai_ready !== undefined && item.ai_ready !== null) details.append(ui.element("p", "media-size", item.person_detected ? "AI 偵測到人" : item.ai_ready ? "動作" : "動作 · AI 暫停"));
     const actions = ui.element("div", "media-actions");
@@ -224,6 +231,7 @@
     actions.append(download, remove);
     meta.append(details, actions);
     node.append(checkboxLabel, imageButton, meta);
+    if(isRecording){const filename=ui.element('p','media-filename',item.filename);node.append(filename);}
     if (damaged) {
       const warning = ui.element("p", "media-size", item.health_message || "無法回放");
       node.append(warning);

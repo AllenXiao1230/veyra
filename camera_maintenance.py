@@ -181,6 +181,11 @@ def backup(dry_run=False, progress=None):
                 (pins / "recorder-state").mkdir()
                 pin_file(settings, pins / "recorder-state" / "settings.json")
             policy = STATE / "storage-policy.json"
+            motion_settings = DATA / 'motion-settings.json'
+            if motion_settings.is_file() and not motion_settings.is_symlink():
+                (pins / 'detector-state').mkdir(exist_ok=True)
+                # atomic_json replaces the inode, so this pin remains immutable.
+                pin_file(motion_settings, pins / 'detector-state/motion-settings.json')
             for filename in ('event-preferences.sqlite3','notifications.sqlite3'):
                 preferences = STATE / filename
                 if preferences.is_file() and not preferences.is_symlink():

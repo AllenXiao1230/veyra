@@ -29,13 +29,34 @@
       this.frameCallback=undefined;this.video.pause();this.video.srcObject=null;this.video.removeAttribute('src');this.video.load();
     }
     stop(){this.active=false;this.generation++;this.cleanup();}
-    setMuted(muted){this.video.muted=muted;return this.video.play();}
+    setMuted(muted){this.video.muted=muted;this.video.volume=1;return muted?Promise.resolve():this.video.play();}
+    async audioStatus(){
+      if(!this.active)return {available:false,receiving:false};
+      if(this.video.readyState<2)return {available:null,receiving:null};
+      if(this.protocol==='webrtc'){
+        const tracks=this.video.srcObject?.getAudioTracks?.()||[];
+        const stats=await this.pc?.getStats();let bytes=0;
+        stats?.forEach(row=>{if(row.type==='inbound-rtp'&&(row.kind==='audio'||row.mediaType==='audio'))bytes+=row.bytesReceived||0;});
+        const receiving=bytes>0&&bytes>this.audioBytes;this.audioBytes=bytes;
+        return {available:tracks.some(t=>t.readyState==='live'),receiving};
+      }
+      const bytes=this.video.webkitAudioDecodedByteCount;
+      const receiving=typeof bytes==='number'?bytes>this.audioBytes:null;
+      if(typeof bytes==='number')this.audioBytes=bytes;
+      return {available:this.hls?this.hls.audioTracks?.length>0:this.video.audioTracks?this.video.audioTracks.length>0:null,receiving};
+    }
     play(){
       this.video.play().catch(()=>{if(this.active){this.video.muted=true;this.muted?.();this.video.play().catch(()=>this.fail());}});
     }
+    observeProgress(){
+      const frames=this.video.getVideoPlaybackQuality?.().totalVideoFrames,clock=this.video.currentTime;
+      // Native HLS can report a permanent zero decoded-frame counter.
+      if((frames!==undefined&&frames!==this.lastFrames)||(Number.isFinite(clock)&&clock!==this.lastClock))this.lastFrame=Date.now();
+      this.lastFrames=frames;this.lastClock=clock;
+    }
     start(preferHls=false){
       this.stop();this.protocol=null;this.active=true;const own=this.generation;this.video.muted=true;this.video.playsInline=true;
-      this.lastFrame=Date.now();this.lastClock=-1;this.lastFrames=-1;
+      this.lastFrame=Date.now();this.lastClock=-1;this.lastFrames=-1;this.audioBytes=0;
       if(this.video.requestVideoFrameCallback){
         const frame=()=>{if(!this.active||own!==this.generation)return;this.lastFrame=Date.now();this.frameCallback=this.video.requestVideoFrameCallback(frame);};
         this.frameCallback=this.video.requestVideoFrameCallback(frame);
@@ -43,9 +64,7 @@
       this.monitor=setInterval(()=>{
         if(!this.active||document.hidden)return;
         if(!this.video.requestVideoFrameCallback){
-          const frames=this.video.getVideoPlaybackQuality?.().totalVideoFrames;
-          if(frames!==undefined&&frames!==this.lastFrames){this.lastFrames=frames;this.lastFrame=Date.now();}
-          else if(frames===undefined&&this.video.currentTime!==this.lastClock){this.lastClock=this.video.currentTime;this.lastFrame=Date.now();}
+          this.observeProgress();
         }
         if(Date.now()-this.lastFrame>20000)this.protocol==='webrtc'?this.hlsStart(own):this.fail();
       },3000);
@@ -56,7 +75,15 @@
       if(!window.RTCPeerConnection)throw new Error('WebRTC unavailable');
       this.protocol='webrtc';const pc=this.pc=new RTCPeerConnection({iceServers:[]});
       pc.addTransceiver('video',{direction:'recvonly'});pc.addTransceiver('audio',{direction:'recvonly'});
-      pc.ontrack=event=>{if(this.active&&own===this.generation){this.video.srcObject=event.streams[0]||new MediaStream([event.track]);this.play();}};
+      const received=new MediaStream();
+      pc.ontrack=event=>{if(this.active&&own===this.generation&&this.protocol==='webrtc'){
+        // WHEP may deliver streamless audio and video tracks in either order.
+        for(const track of event.streams.flatMap(s=>s.getTracks()).concat(event.track)){
+          if(track&&!received.getTracks().some(t=>t.id===track.id))received.addTrack(track);
+        }
+        if(this.video.srcObject!==received)this.video.srcObject=received;
+        this.play();
+      }};
       pc.onconnectionstatechange=()=>{if(this.active&&own===this.generation&&pc.connectionState==='failed')this.hlsStart(own);};
       this.deadline=setTimeout(()=>{if(this.active&&own===this.generation&&this.protocol==='webrtc')this.hlsStart(own);},9000);
       await pc.setLocalDescription(await pc.createOffer());
@@ -99,9 +126,7 @@
       }
       this.monitor=setInterval(()=>{
         if(!this.active||document.hidden)return;
-        const frames=this.video.getVideoPlaybackQuality?.().totalVideoFrames;
-        if(frames!==undefined&&frames!==this.lastFrames){this.lastFrames=frames;this.lastFrame=Date.now();}
-        else if(frames===undefined&&this.video.currentTime!==this.lastClock){this.lastClock=this.video.currentTime;this.lastFrame=Date.now();}
+        this.observeProgress();
         if(Date.now()-this.lastFrame>20000)this.fail();
       },3000);
     }

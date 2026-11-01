@@ -153,6 +153,7 @@ class FeatureTests(unittest.TestCase):
         notices.policy({'enabled':False,'recoveries':True,'cooldown':900})
         with closing(sqlite3.connect(self.data/'events.sqlite3')) as db,db:db.execute("UPDATE events SET snapshot_name='' WHERE id>8")
         code=self.root/'camera_ai.py';code.write_text('# fixture')
+        (self.data/'motion-settings.json').write_text(json.dumps({'area_percent':2.1,'difference':24,'confirm_frames':4,'light_compensation':True}))
         with patch.multiple(maintenance,DATA=self.data,RECORDINGS=self.videos,STATE=self.state,BACKUPS=self.root/'backups'), \
              patch.object(maintenance,'configuration_entries',return_value=[(code,'srv/camera-monitor/app/ai/camera_ai.py')]), \
              patch.object(maintenance.shutil,'disk_usage',return_value=SimpleNamespace(total=100*1024**3,used=10*1024**3,free=90*1024**3)), \
@@ -161,6 +162,7 @@ class FeatureTests(unittest.TestCase):
         with closing(sqlite3.connect(f'file:{backup/"maintenance-state/notifications.sqlite3"}?mode=ro',uri=True)) as db:
             self.assertEqual(db.execute('SELECT enabled,cooldown FROM settings').fetchone(),(0,900))
             self.assertEqual(db.execute('SELECT count(*) FROM notices').fetchone()[0],1)
+        self.assertEqual(json.loads((backup/'detector-state/motion-settings.json').read_text())['area_percent'],2.1)
 
 
 if __name__=='__main__':unittest.main()

@@ -5,12 +5,23 @@
 Ubuntu 攝影機監控專案的維護來源，包含 `hybrid1`、`stability1`、`mobile1` 與 `reliability1` 擴充：背景移動偵測、事件快照、時間戳直播、
 動態錄影、事件時間軸、健康監控與本機增量備份。網頁透過 nginx 和 Tailscale 提供私有存取。
 
-目前版本為 `features1`，加入站內故障／恢復通知、工作與下載中心、進階事件查找及整合音畫串流，詳見 [FEATURES_20261031.md](FEATURES_20261031.md)。下方具版本名稱的章節保留各版沿革；現役部署清單為 `camera-monitor-features1-manifest.json`。
+目前版本為 `tuning1`，改善動作判斷設定、連線觀測、媒體網格／清單及音畫整合。現役清單為 `camera-monitor-tuning1-manifest.json`，86 個映射檔案加 `current-release.json` 共 87 個。下方具版本名稱的章節保留各版沿革；features1 功能紀錄見 [FEATURES_20261031.md](FEATURES_20261031.md)。
 
 這份 repository 是既有服務的維護來源，不是從零安裝套件；各版本的部署／驗收結果須以對應交付紀錄為準。完整操作說明與驗收限制見
 [README_camera_monitor.md](README_camera_monitor.md)。
 
-## 新功能入口（features1）
+## 本輪改善（tuning1，2026-11-02）
+
+- 「設定 → 動作判斷」可保存最小動作面積（%）、像素差、連續確認影格與整體亮度補償。現有環境推導初始值為 1.085%／18／3／開啟；前三項越大越嚴格，目前約每秒判斷 2 影格。以模糊、形態去噪與亮度補償降低干擾，即時套用且不重啟擷取；小幅活動仍延長錄影，AI 僅標註，安靜 30 秒停錄不變。只有自訂變更才以原子方式寫入 `data/ai/motion-settings.json`；備份及隔離還原見 [RECOVERY.md](RECOVERY.md)。
+- 首頁將伺服器連線、影像狀態、麥克風輸入與播放音訊分開呈現。每 5 秒在頁面可見時實測 `/ai-api/status`；近 5 分鐘最多 60 筆顯示成功次數、成功 HTTP 回應時間中位數及本頁探測恢復次數。這是本頁觀測，不能當作歷史 SLA、伺服器 uptime 或媒體健康證明。
+- 快照／錄影可切換網格與清單；實際縮圖完整保留 16:9，日期分組、台北時間、狀態與固定分頁可讀。操作目標至少 44px，手機錄影網格改單欄；手機每頁 12、桌面 24，歷史資料仍可翻頁取得，回收桶及活動錄影保護維持。
+- WebRTC 合併音／畫軌，明示音訊接收狀態；修正快速切換監聽的競爭與原生 HLS 零影格統計造成的誤重連。「重新連接音畫」只重建整合發布器，不重啟麥克風或錄影。輸出連續兩次有效檢查為靜音且輸入高於 −60 dBFS 才自動恢復，安靜環境與探測失敗不當作故障。
+
+本次實際間歇無聲原因是麥克風 RTP 時戳被封包抵達的 wallclock 取代，導致重取樣插入靜音；現已保留音訊 RTP clock，JPEG 輸入仍用 wallclock，音畫起點仍正規化。最新 01:23:52 部署只因這項修正重啟整合串流。隔離超過 95 秒與正式 126.59 秒證據都取得 Opus／AAC 各 6/6 秒非零音訊；正式證據同一發布 session、恢復 0 次，錄影 PID 2747470 不變。早期 3 秒探測亦受影片時序影響，不能當作最終證據。
+
+Linux 143 項 Python 測試通過（24.628 秒），本機 5 組 Node 測試通過；伺服器無 Node。reviewer 的最終 ship 關閉唯一待確認的正式長音訊門檻，沒有擴稱判決後全表面重新審查。精確 commit、CI 及最後部署核對以本版交付紀錄為準。本機功能後備份 `20261102-010557-441353` 已校驗 2,900 檔／21,478,673,751 bytes，無活動片段略過；它早於最後 clock 修正與文件，不包含日後程式或資料變動。實體 iPhone 可聽聲音／觸控／長時間記憶體、精確唇音同步與穩定外網整檔下載仍未驗證，外部備份仍待設定。
+
+## 新功能入口（features1，歷史版本）
 
 - 共用頁首的「通知」顯示六項服務、儲存、備份新鮮度、入口及服務警告的確認異常／恢復；連續兩次檢查異常才通知，設有去重與冷卻。未讀及已讀狀態保存於伺服器；設定視窗可調整通知。只做站內通知，不會即時通知每個工作失敗。
 - 頁首「工作與下載」整合 API 備份／驗證／隔離還原工作、事件匯出及原檔下載捷徑，可篩選、分頁及重試；取消僅適用事件匯出。它不包含作業系統排程工作的完整歷史。「已準備好」只代表伺服器可供下載，瀏覽器是否已存檔由使用者確認。
@@ -19,7 +30,7 @@ Ubuntu 攝影機監控專案的維護來源，包含 `hybrid1`、`stability1`、
 
 現役六項健康 API 為 loopback 8091–8096，經既有私有 Nginx／Tailscale 入口；路由與資料位置見 [LAYOUT.md](LAYOUT.md)。新增套件需求為 Ubuntu `python3-yaml`。HLS 使用本站按需載入的完整 hls.js 1.7.2（MIT，[LICENSE-hls.txt](LICENSE-hls.txt)），不在播放時向 CDN 取程式。Range 續傳、私有檔案 404 與既有正式設定保留規則不變。
 
-本輪 Linux 136 項單元測試及本機 4 組 Node 測試通過；伺服器未安裝 Node。六項服務健康與本機入口檢查不能代替實體 iPhone 的可聽聲音、觸控、長時間記憶體或穩定外網整檔下載驗收，這些仍未驗證。完整證據界線見功能紀錄。
+features1 當時 Linux 136 項單元測試及本機 4 組 Node 測試通過；伺服器未安裝 Node。六項服務健康與本機入口檢查不能代替實體 iPhone 的可聽聲音、觸控、長時間記憶體或穩定外網整檔下載驗收，這些仍未驗證。完整證據界線見功能紀錄。
 
 ## 錄影與資料可靠性（reliability1）
 
@@ -48,6 +59,7 @@ AI 改用有界背景佇列，動作先記錄，時間軸明示「AI 分析中�
 | 來源 | 部署位置／用途 |
 | --- | --- |
 | `camera_ai.py` | `/opt/camera-ai/camera_ai.py`，背景偵測與事件 API |
+| `camera_motion.py`、`camera-connection.js` | 共用動作政策／原子保存、首頁可見期間連線觀測 |
 | `recorder.py` | `/opt/camera-recorder/server.py`，錄影控制與動態觸發錄影 |
 | `timestamp_v2.py` | `/opt/camera-timestamp/server.py`，時間戳直播 |
 | `camera_runtime.py`、`camera_catalog.py`、`wait_ready.py` | `/opt/camera-common/` |
@@ -69,7 +81,7 @@ AI 改用有界背景佇列，動作先記錄，時間軸明示「AI 分析中�
 | `nginx-camera-monitor` | loopback Web 入口與反向代理設定 |
 | `camera-monitor-fix1-manifest.json` | 24 個部署檔案的路徑與 SHA-256 |
 | `camera-monitor-*-manifest.json` | 各版部署檔案的路徑與 SHA-256；依本次交付紀錄選用對應版本 |
-| `camera-monitor-features1-manifest.json` | 目前完整清單；84 個部署檔案，另加 current-release 共核對 85 個檔案 |
+| `camera-monitor-tuning1-manifest.json` | 目前完整清單；86 個映射檔案，另加 current-release 共 87 個檔案；最終核對見本版交付紀錄 |
 
 檔案保持平面配置，便於核對部署內容與在隔離目錄執行既有測試。Repository 不包含
 錄影、快照、事件資料庫、密碼、SSH 連線工具或正式環境的憑證。
@@ -86,9 +98,10 @@ sudo python3 test_camera_maintenance.py
 python3 test_camera_events.py
 python3 test_camera_reliability.py
 python3 test_camera_features.py
+python3 test_camera_tuning.py
 ```
 
-完整 Python 回歸使用 `python3 -m unittest discover -v`；Node 可用的本機環境另執行 `test_camera_mobile.cjs`、`test_camera_pages.cjs`、`test_camera_preview.cjs`、`test_camera_stream.cjs`。Node 不是正式服務執行依賴。
+完整 Python 回歸使用 `python3 -m unittest discover -v`；Node 可用的本機環境另執行 `test_camera_mobile.cjs`、`test_camera_pages.cjs`、`test_camera_preview.cjs`、`test_camera_stream.cjs`、`test_camera_connection.cjs`。Node 不是正式服務執行依賴。
 
 維護測試會在 temporary directory 建立測試資料。它在 Ubuntu 上以管理權限驗證
 設定封存與增量備份，並模擬服務重啟呼叫，不會重啟正式服務。

@@ -114,6 +114,7 @@
   let settingsGeneration = 0;
   let settingsBackupBaseline = null;
   let settingsNotificationBaseline = null;
+  let settingsDetectionBaseline = null;
   const settingsErrors = new Map();
   let polling = false;
   const settings = element("dialog");
@@ -125,6 +126,8 @@
     <section class="settings-section"><h3>音訊</h3><div class="setting-source"><label for="settingSource">輸入來源</label><select id="settingSource" disabled><option value="">讀取中…</option></select></div><div class="setting-row"><label for="settingVolume">輸入音量</label><input id="settingVolume" type="range" min="0" max="100" value="80"><output id="settingVolumeValue" for="settingVolume">80%</output></div><div class="setting-row"><label for="settingMuted">麥克風靜音</label><input id="settingMuted" type="checkbox"></div><p class="settings-status" id="settingsAudioStatus"></p><p class="notice" id="settingsRecordingWarning" hidden>錄影中無法切換或重啟音訊，請先停止錄影。</p><div class="setting-row"><button id="settingAudioRestart" type="button">${icon("refresh")}重新啟動音訊</button><button id="settingSourcesRefresh" class="quiet" type="button">更新來源</button></div></section>
     <p class="dialog-error" id="settingsError" role="status" hidden></p></div><div class="dialog-footer"><button id="cancelSettings" type="button">取消</button><button id="saveSettings" class="primary" type="submit">儲存設定</button></div></form>`;
   document.body.append(settings);
+  const detectionIds=['settingMotionArea','settingMotionDifference','settingMotionFrames','settingMotionLight'];
+  $('settingMotion').closest('section').insertAdjacentHTML('afterend',`<section class="settings-section"><h3>動作判斷</h3><div class="setting-row"><label for="settingMotionArea">最小動作面積（%）</label><input id="settingMotionArea" type="number" min="0.05" max="50" step="0.001" disabled></div><div class="setting-row"><label for="settingMotionDifference">像素差閾值（8–80）</label><input id="settingMotionDifference" type="number" min="8" max="80" step="1" disabled></div><div class="setting-row"><label for="settingMotionFrames">連續確認（影格）</label><input id="settingMotionFrames" type="number" min="1" max="12" step="1" disabled></div><div class="setting-row"><label for="settingMotionLight">補償整體亮度變化</label><input id="settingMotionLight" type="checkbox" disabled></div><p class="settings-status">閾值越大越嚴格；目前約每秒 2 影格。即時套用，AI 只標註，錄影停止延遲另設。</p><p id="motionMeasurement" class="settings-status" role="status"></p></section>`);
   settings.querySelectorAll('section')[1].insertAdjacentHTML("beforeend", '<div class="setting-row"><label for="settingRecordQuota">錄影容量上限（GB）</label><input id="settingRecordQuota" type="number" min="0" max="102400" step="any" value="0" disabled></div>');
   $("settingMotion").closest("section").insertAdjacentHTML("beforeend", `<div class="setting-row"><label for="settingStopDelay">動作停止後延遲（秒）</label><input id="settingStopDelay" type="number" min="5" max="600" step="1" value="30" disabled></div><div class="setting-row"><label for="settingReserve">錄影保留空間（MB）</label><input id="settingReserve" type="number" min="256" max="102400" step="256" value="1024" disabled></div><p class="settings-status" id="settingsDetectionStatus">動作觸發，AI 輔助分類</p>`);
   $("settingsError").insertAdjacentHTML("beforebegin", `<section class="settings-section"><h3>備份</h3><div class="setting-row"><span>本機備份與復原</span><a class="button" href="/backups.html">備份管理</a></div></section>`);
@@ -189,9 +192,11 @@
     $("settingMuted").disabled = true;
     settingsErrors.clear();
     settingsNotificationBaseline=null;
+    settingsDetectionBaseline=null;
+    for(const id of detectionIds)$(id).disabled=true;
     for(const id of ['settingNotices','settingRecoveries','settingNoticeCooldown'])$(id).disabled=true;
     showSettingsError("");
-    const results = await Promise.allSettled([api("/audio-api/status"), api("/recordings-api/status"), api("/backups-api/policy"),api('/backups-api/notifications/policy')]);
+    const results = await Promise.allSettled([api("/audio-api/status"), api("/recordings-api/status"), api("/backups-api/policy"),api('/backups-api/notifications/policy'),api('/ai-api/motion/settings')]);
     if (generation !== settingsGeneration || !settings.open) return;
     if (results[0].status === "fulfilled") {
       lastAudio = results[0].value;
@@ -224,6 +229,12 @@
       $('settingNoticeCooldown').value=String(policy.cooldown);
       for(const id of ['settingNotices','settingRecoveries','settingNoticeCooldown'])$(id).disabled=false;
     }else showSettingsError('通知設定讀取失敗，請重新開啟設定。','loadNotifications');
+    if(results[4].status==='fulfilled'){
+      const p=settingsDetectionBaseline=results[4].value;
+      $('settingMotionArea').value=p.area_percent;$('settingMotionDifference').value=p.difference;
+      $('settingMotionFrames').value=p.confirm_frames;$('settingMotionLight').checked=p.light_compensation;
+      for(const id of detectionIds)$(id).disabled=false;
+    }else showSettingsError('動作閾值讀取失敗，請重新開啟設定。','loadDetection');
     $("saveSettings").disabled = false;
   }
   $("openSettings").addEventListener("click", () => {
@@ -267,6 +278,11 @@
     save.textContent = "儲存中…";
     try {
       showSettingsError("", "general");
+      const detection={area_percent:Number($('settingMotionArea').value),difference:Number($('settingMotionDifference').value),confirm_frames:Number($('settingMotionFrames').value),light_compensation:$('settingMotionLight').checked};
+      if(settingsDetectionBaseline&&JSON.stringify(detection)!==JSON.stringify(settingsDetectionBaseline)){
+        try{settingsDetectionBaseline=await api('/ai-api/motion/settings',detection);showSettingsError('','saveDetection');}
+        catch(error){showSettingsError('動作判斷：'+error.message,'saveDetection');}
+      }else if(settingsDetectionBaseline)showSettingsError('','saveDetection');
       const audio = {source: $("settingSource").value, volume: Number($("settingVolume").value), muted: $("settingMuted").checked};
       if (settingsAudioBaseline && !$("settingSource").disabled && audio.source &&
           (audio.source !== settingsAudioBaseline.source || audio.volume !== settingsAudioBaseline.volume || audio.muted !== settingsAudioBaseline.muted)) {
@@ -304,6 +320,10 @@
     polling = true;
     try {
       const results = await Promise.allSettled([api("/audio-api/status", undefined, 7000), api("/recordings-api/status", undefined, 8000)]);
+      if(settings.open){
+        try{const state=await api('/ai-api/status',undefined,5000);if(settings.open){const m=state.motion_measurement;$('motionMeasurement').textContent=state.warmup_remaining>0?'背景學習中 · 剩餘 '+state.warmup_remaining+' 影格':m?`目前動作面積 ${m.area_percent}% · 變動畫素 ${m.activity_percent}%`:'等待動作量測';}}
+        catch(_){if(settings.open)$('motionMeasurement').textContent='即時動作量測暫不可用';}
+      }
       if (results[0].status === "fulfilled") {
         lastAudio = results[0].value;
         window.dispatchEvent(new CustomEvent("camera-audio", {detail: lastAudio}));

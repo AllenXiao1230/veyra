@@ -10,7 +10,7 @@ RETIRED={'/home/xuan/.config/systemd/user/camera-audio.service.d/readiness.conf'
          'Replaced by the audio supervisor; do not reinstall the old readiness override.',
          '/srv/camera-monitor/web/LICENSE-hls.js':'License text is distributed as LICENSE-hls.txt.',
          '/srv/camera-monitor/web/hls.light.min.js':'Use full hls.min.js for MediaMTX separate audio renditions.'}
-COMMON=('camera_sessions.py','camera_diagnostics.py','camera_annotations.py','camera_deployment.py','camera_layout.py',
+COMMON=('camera_sessions.py','camera_diagnostics.py','camera_annotations.py','camera_deployment.py','camera_layout.py','camera_motion.py',
         'camera_notifications.py','camera_work.py','camera_stream.py','camera_stream_config.py')
 
 
@@ -33,7 +33,7 @@ def build(root, release):
         mapping[canonical('/home/xuan/.config/systemd/user/'+source)]=source
     for source in ('migrate_layout.py','LAYOUT.md','FEATURES_20261031.md'):
         mapping[canonical('/opt/camera-monitor/'+source)]=source
-    for source in ('camera-center.js','camera-stream.js','hls.min.js','LICENSE-hls.txt'):
+    for source in ('camera-center.js','camera-stream.js','camera-connection.js','hls.min.js','LICENSE-hls.txt'):
         mapping['/srv/camera-monitor/web/'+source]=source
     mapping['/srv/camera-monitor/config/mediamtx/mediamtx.yml']='mediamtx.yml.example'
     files=[];assets=[]

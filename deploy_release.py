@@ -24,7 +24,7 @@ def affected_services(files):
     paths=[row['path'] for row in files]
     shared={'camera_state.py','camera_runtime.py'}
     result=[]
-    if any(p.startswith('/srv/camera-monitor/app/ai/') for p in paths) or names & (shared|{'camera_annotations.py','camera_media.py','camera_index.py','camera_storage.py','camera_person.py','camera_jobs.py'}): result.append('camera-ai')
+    if any(p.startswith('/srv/camera-monitor/app/ai/') for p in paths) or names & (shared|{'camera_motion.py','camera_annotations.py','camera_media.py','camera_index.py','camera_storage.py','camera_person.py','camera_jobs.py'}): result.append('camera-ai')
     if any(p.startswith('/srv/camera-monitor/app/recorder/') for p in paths) or names & (shared|{'camera_deployment.py','camera_media.py','camera_index.py','camera_storage.py','camera_sessions.py','camera_http.py','camera_catalog.py','camera_playback.py','camera_jobs.py'}): result.append('camera-recorder-api')
     if names & (shared|{'camera_deployment.py','backup_api.py','camera_maintenance.py','camera-maintenance','camera_backups.py','camera_media.py','camera_http.py','camera_index.py','camera_timeline.py','camera_storage.py','camera_diagnostics.py','camera_jobs.py'}): result.append('camera-backup-api')
     if any(p.startswith('/srv/camera-monitor/app/timestamp/') for p in paths) or names & shared: result.append('camera-timestamp')

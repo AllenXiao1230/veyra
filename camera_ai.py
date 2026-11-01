@@ -22,6 +22,7 @@ from camera_state import media_guard
 from camera_person import PersonAnnotator
 from camera_storage import require_space, StoragePressure
 from camera_annotations import AnnotationWorker
+from camera_motion import MotionPolicy
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -325,38 +326,51 @@ class OnnxPersonDetector:
 
 
 class MotionAnalyzer:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, policy=None) -> None:
         self.settings = settings
+        self.policy = policy or {'area_percent': settings.motion_area_min / (settings.capture_width ** 2 * 9 / 16) * 100, 'difference': 18, 'light_compensation': True}
         self.subtractor = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=20, detectShadows=False)
         self.frames_seen = 0
         self.previous_gray = None
         self.activity_active = False
+        self.reference_light = None
+        self.area_percent = 0.0
+        self.activity_percent = 0.0
 
     def inspect(self, frame: np.ndarray) -> tuple[bool, float]:
         gray = cv2.GaussianBlur(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (5, 5), 0)
+        light = float(np.median(gray))
+        if self.reference_light is None:
+            self.reference_light = light
+        if self.policy['light_compensation']:
+            gray = np.clip(gray.astype(np.float32) - light + self.reference_light, 0, 255).astype(np.uint8)
         activity_area = 0
         if self.previous_gray is not None and self.previous_gray.shape == gray.shape:
-            delta = cv2.threshold(cv2.absdiff(gray, self.previous_gray), 18, 255, cv2.THRESH_BINARY)[1]
+            delta = cv2.threshold(cv2.absdiff(gray, self.previous_gray), self.policy['difference'], 255, cv2.THRESH_BINARY)[1]
             delta = cv2.morphologyEx(delta, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
             activity_area = cv2.countNonZero(delta)
         self.previous_gray = gray
-        foreground = self.subtractor.apply(frame)
+        foreground = self.subtractor.apply(gray)
         foreground = cv2.morphologyEx(foreground, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
         foreground = cv2.dilate(foreground, None, iterations=2)
         contours, _ = cv2.findContours(foreground, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         largest = max((cv2.contourArea(contour) for contour in contours), default=0.0)
         self.frames_seen += 1
-        active = self.frames_seen > self.settings.warmup_frames and largest >= self.settings.motion_area_min
+        minimum = gray.size * self.policy['area_percent'] / 100
+        self.area_percent = round(largest / gray.size * 100, 3)
+        self.activity_percent = round(activity_area / gray.size * 100, 3)
+        active = self.frames_seen > self.settings.warmup_frames and largest >= minimum and activity_area >= max(64, minimum * .08)
         # A confirmed recording needs a lower continuation threshold than its
         # trigger. Frame differences also survive MOG2 background adaptation.
         self.activity_active = (self.frames_seen > self.settings.warmup_frames
-                                and activity_area >= max(64, self.settings.motion_area_min * 0.08))
+                                and activity_area >= max(64, minimum * 0.08))
         return active, float(largest)
 
 
 class DetectorService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.motion_policy = MotionPolicy(settings)
         self.store = EventStore(settings.data_dir)
         self.media = MediaLibrary(self.store.snapshots_dir, "snapshot", self.store.db_path)
         self.person_detector = OnnxPersonDetector(settings)
@@ -409,6 +423,8 @@ class DetectorService:
                       ai_inference_ms=getattr(self.person_detector, "inference_ms", None))
         result["warmup_remaining"] = getattr(self, "warmup_remaining", self.settings.warmup_frames)
         result["stream_url"] = self.settings.stream_url
+        result['motion_settings'] = self.motion_policy.get()
+        result['motion_measurement'] = getattr(self, 'motion_measurement', None)
         return result
 
     def supervise(self) -> None:
@@ -428,7 +444,9 @@ class DetectorService:
             delay = 1.0 if time.monotonic() - started > 60 else min(30.0, delay * 2)
 
     def run(self) -> None:
-        analyzer = MotionAnalyzer(self.settings)
+        policy_version = self.motion_policy.version
+        policy = self.motion_policy.get()
+        analyzer = MotionAnalyzer(self.settings, policy)
         capture: MJPEGCapture | None = None
         consecutive_motion = 0
         last_event_monotonic = 0.0
@@ -460,11 +478,19 @@ class DetectorService:
                     frame = cv2.resize(source_frame, (target_width, target_height), interpolation=cv2.INTER_AREA)
                 else:
                     frame = source_frame
+                if policy_version != self.motion_policy.version:
+                    policy_version = self.motion_policy.version
+                    policy = self.motion_policy.get()
+                    analyzer.policy = policy
+                    # Compare frames only within the same normalization policy.
+                    analyzer.previous_gray = None
+                    consecutive_motion = 0
                 active, motion_area = analyzer.inspect(frame)
+                self.motion_measurement = {'area_percent': analyzer.area_percent, 'activity_percent': analyzer.activity_percent}
                 self.warmup_remaining = max(0, self.settings.warmup_frames - analyzer.frames_seen)
                 self.update_state(stream_connected=True, last_frame_at=utc_now(), last_error=None)
                 consecutive_motion = consecutive_motion + 1 if active else 0
-                self.motion_active = consecutive_motion >= self.settings.motion_min_frames
+                self.motion_active = consecutive_motion >= policy['confirm_frames']
                 self.activity_active = bool(analyzer.activity_active)
                 if self.motion_active:
                     self.motion_sequence += 1
@@ -474,7 +500,7 @@ class DetectorService:
                     self.last_activity_tick = time.monotonic()
 
                 now = time.monotonic()
-                if consecutive_motion >= self.settings.motion_min_frames and now - last_event_monotonic >= self.settings.event_cooldown_seconds:
+                if self.motion_active and now - last_event_monotonic >= self.settings.event_cooldown_seconds:
                     event_type = "motion"
                     pending=self.annotations.accepting
                     # Keep a just-written snapshot and its event indivisible to trash requests.
@@ -494,7 +520,7 @@ class DetectorService:
                             metadata={"person_count": 0, "capture_width": int(frame.shape[1]),
                                       "trigger": "motion", "ai_ready": None,
                                       "ai_status": 'pending' if pending else 'unavailable',
-                                      "motion_sequence": self.motion_sequence},
+                                      "motion_sequence": self.motion_sequence, "motion_settings": policy},
                         )
                     if pending:self.annotations.submit(event_id,frame)
                     LOG.info("stored %s event id=%s motion_area=%.1f", event_type, event_id, motion_area)
@@ -542,6 +568,12 @@ class ApiHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         # Scheme B: reject cached legacy clients before reading or storing a body.
         path = urlparse(self.path).path
+        if path == '/motion/settings':
+            try:
+                self.send_json(200, self.service.motion_policy.save(read_body(self)))
+            except Exception as exc:
+                media_error(self, exc)
+            return
         if path in {"/trash", "/restore", "/purge", "/batch"}:
             try:
                 data = read_body(self)
@@ -560,6 +592,9 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path == '/motion/settings':
+            self.send_json(200, self.service.motion_policy.get())
+            return
         if parsed.path in {"/library", "/trash"} or parsed.path.startswith(("/snapshots/", "/thumbnail/")):
             try:
                 if parsed.path == "/library":

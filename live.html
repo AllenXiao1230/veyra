@@ -3,12 +3,13 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#101216"><title>即時監看 · Camera Monitor</title>
-  <link rel="stylesheet" href="/camera-ui.css?v=features1">
-  <script src="/camera-ui.js?v=features1" defer></script>
-  <script src="/camera-center.js?v=features1" defer></script>
-  <script src="/camera-mobile.js?v=features1" defer></script>
-  <script src="/camera-stream.js?v=features1" defer></script>
-  <script src="/camera-live.js?v=features1" defer></script>
+  <link rel="stylesheet" href="/camera-ui.css?v=tuning1">
+  <script src="/camera-ui.js?v=tuning1" defer></script>
+  <script src="/camera-center.js?v=tuning1" defer></script>
+  <script src="/camera-mobile.js?v=tuning1" defer></script>
+  <script src="/camera-stream.js?v=tuning1" defer></script>
+  <script src="/camera-live.js?v=tuning1" defer></script>
+  <script src="/camera-connection.js?v=tuning1" defer></script>
 </head>
 <body data-page="live">
   <header class="app-header" id="appHeader"></header>
@@ -17,6 +18,10 @@
       <h1>即時監看</h1>
       <span class="status" id="liveStatus" role="status"><span class="dot"></span><span>連線中</span></span>
     </div>
+    <section class="connection-row" aria-label="伺服器連線狀況">
+      <span class="status" id="serverConnection" role="status"><span class="dot"></span><span>正在確認伺服器連線</span></span>
+      <span id="connectionMetrics" class="muted">穩定度從本頁開啟後開始觀測</span>
+    </section>
     <section aria-label="攝影機即時影像">
       <div class="viewer" id="liveViewer">
         <img id="liveImage" alt="即時攝影機影像" decoding="async">
@@ -41,6 +46,8 @@
         <output id="audioLevelValue" aria-hidden="true">讀取中</output>
       </div>
       <button id="listenToggle" type="button"><span data-icon="volume"></span><span>開啟監聽</span></button>
+      <p class="playback-status muted" id="playbackAudioStatus" role="status">播放聲音已關閉</p>
+      <button id="audioReconnect" type="button" class="quiet">重新連接音畫</button>
     </section>
     <iframe class="audio-frame" id="micFrame" title="音訊播放器" allow="autoplay" tabindex="-1" aria-hidden="true"></iframe>
   </main>

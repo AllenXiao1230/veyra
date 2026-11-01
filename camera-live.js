@@ -15,6 +15,7 @@
   let publisherPid = null;
   let wasHealthy = false;
   let audioSeen = false;
+  let streamSession=null,missingAudio=0;
   let levelTimer;
   let levelBusy = false;
   let pageGone = false;
@@ -207,6 +208,7 @@
   function listenButton() {
     $("listenToggle").innerHTML = ui.icon(wantsAudio ? "muted" : "volume") + `<span>${wantsAudio ? "停止監聽" : "開啟監聽"}</span>`;
     $("listenToggle").setAttribute("aria-pressed", String(wantsAudio));
+    if($('playbackAudioStatus'))$('playbackAudioStatus').textContent=wantsAudio?'監聽已開啟 · 等待接收檢查':'播放聲音已關閉';
   }
   function renderLevel(state) {
     const value = state?.available ? Math.max(0, Math.min(100, state.level)) : 0;
@@ -239,8 +241,9 @@
   }
   $("listenToggle").addEventListener("click", async () => {
     if(integrated?.active){
-      try{await integrated.setMuted(wantsAudio);wantsAudio=!wantsAudio;}
-      catch(_){integratedVideo.muted=true;wantsAudio=false;ui.toast('聲音尚未就緒，請稍後再按開啟監聽。');}
+      const generation=integrated.generation,enable=!wantsAudio;
+      try{await integrated.setMuted(!enable);if(!integrated.active||generation!==integrated.generation||document.hidden)return;wantsAudio=enable&&!integratedVideo.muted;}
+      catch(_){if(!integrated.active||generation!==integrated.generation||document.hidden)return;integratedVideo.muted=true;wantsAudio=false;ui.toast('聲音尚未就緒，請稍後再按開啟監聽。');}
       listenButton();return;
     }
     if (wantsAudio) {
@@ -256,6 +259,12 @@
       catch (error) { ui.toast(error.message || "請重新開啟監聽。"); }
     }
     listenButton();
+  });
+  $('audioReconnect')?.addEventListener('click',async event=>{
+    event.currentTarget.disabled=true;wantsAudio=false;frame.removeAttribute('src');if(integratedVideo)integratedVideo.muted=true;listenButton();
+    try{await ui.api('/stream-api/restart',{});streamSession=null;missingAudio=0;streamFailed=false;connect();ui.toast('音畫正在重新連接，就緒後請開啟監聽。');}
+    catch(error){ui.toast(error.message);}
+    finally{$('audioReconnect').disabled=false;}
   });
   frame.addEventListener("load", () => {
     if (wantsAudio) startAudio().catch(() => {
@@ -275,7 +284,21 @@
   async function checkPreview() {
     if(integrated?.active){
       if(healthBusy||document.hidden||pageGone)return;healthBusy=true;
-      try{const state=await ui.api('/stream-api/status',undefined,5000);if(integrated.active&&!document.hidden){streamWarning.hidden=state.healthy&&state.audio_included;streamWarning.textContent=!state.healthy?'音畫串流正在恢復。':state.warning||'目前串流只有影像，音訊恢復後會自動重新連接。';}}
+      try{
+        const state=await ui.api('/stream-api/status',undefined,5000);
+        if(integrated.active&&!document.hidden){
+          if(streamSession&&state.session_id&&streamSession!==state.session_id){streamSession=state.session_id;connect();return;}
+          streamSession=state.session_id||streamSession;
+          streamWarning.hidden=state.healthy&&state.audio_included;
+          streamWarning.textContent=!state.healthy?'音畫串流正在恢復。':state.warning||'目前串流只有影像，音訊恢復後會自動重新連接。';
+          if(state.audio_probe?.state==='silent'){streamWarning.hidden=false;streamWarning.textContent='音訊輸出沒有訊號，正在確認並自動恢復；也可按重新連接音畫。';}
+          const audio=await integrated.audioStatus();
+          if(!integrated.active||document.hidden)return;
+          missingAudio=state.audio_included&&audio.available===false?missingAudio+1:0;
+          if(missingAudio>=3){missingAudio=0;streamSession=null;connect();return;}
+          if($('playbackAudioStatus'))$('playbackAudioStatus').textContent=!wantsAudio?'播放聲音已關閉':!state.audio_included?'目前串流沒有音軌':audio.receiving===false?'監聽已開啟 · 尚未收到新的音訊':audio.receiving===true?'監聽中 · 正在接收音訊':'監聽已開啟 · 音訊由瀏覽器播放';
+        }
+      }
       catch(_){if(integrated.active){streamWarning.hidden=false;streamWarning.textContent='無法讀取音畫串流狀態，播放中斷時可按重新連線。';}}
       finally{healthBusy=false;}return;
     }

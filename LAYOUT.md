@@ -22,7 +22,7 @@
 │   ├── tmpfiles/
 │   └── maintenance.json    保存政策
 ├── data/
-│   ├── ai/                 事件資料庫、快照與快照回收桶
+│   ├── ai/                 事件資料庫、快照、回收桶與自訂 motion-settings.json
 │   ├── recordings/         影片、session、設定與影片回收桶
 │   ├── maintenance/        工作、收藏／備註、站內通知、匯出與隔離還原
 │   └── timestamp/
@@ -37,7 +37,7 @@
 
 只有 `web/` 經 Nginx 對外提供。設定、原始碼、資料庫、影片與備份不放在網站根目錄；媒體仍透過原有 API 存取。Git 只追蹤 source 內的程式、範本與文件，不包含正式設定、資料、模型或憑證。
 
-## features1 服務與入口
+## tuning1 服務與入口
 
 Nginx 仍只監聽 `127.0.0.1:8090`，由現有 Tailscale Serve 私有 HTTPS 提供。六項健康 API 都只綁 loopback：
 
@@ -56,6 +56,12 @@ Nginx 仍只監聽 `127.0.0.1:8090`，由現有 Tailscale Serve 私有 HTTPS 提
 
 原檔下載仍支援 Range，伺服器準備完成不代表瀏覽器已存檔。私有資料不由靜態根目錄提供，對應直接網址仍回 404。
 
+tuning1 沿用上述六項服務與入口。`app/common/camera_motion.py` 驗證動作政策，`GET/POST /ai-api/motion/settings` 經既有 AI API 提供；只有自訂值改變才原子建立／更新 `data/ai/motion-settings.json`，未自訂時使用既有環境推導的初始值。自訂政策隨備份保存到 `detector-state/motion-settings.json`，隔離還原保留相對位置，不直接寫回正式資料。
+
+`web/camera-connection.js` 只在首頁可見期間每 5 秒探測現有 `/ai-api/status`，保留近 5 分鐘最多 60 筆 HTTP 觀測；不是另一項服務或歷史 SLA。音畫發布保留 JPEG wallclock、麥克風 RTP clock 與正規化起點；`POST /stream-api/restart` 只要求整合發布器重建，不重啟錄影／麥克風。前端仍由原三頁、共用設定與實際媒體網格／清單組成。
+
+現役清單為 `camera-monitor-tuning1-manifest.json`，86 個映射檔案加 `app/management/current-release.json` 共 87。精確 commit、CI 及最終文件／部署核對見本版交付紀錄。
+
 ## 系統入口與相容路徑
 
 systemd 需在 `/etc/systemd/system/` 及使用者的 systemd 設定目錄註冊，Nginx、logrotate、tmpfiles 也需標準系統入口。這些入口是指向本專案 config 的符號連結，實體檔案集中於本目錄。新服務與程式使用 `/srv/camera-monitor` 路徑。
@@ -72,10 +78,12 @@ systemd 需在 `/etc/systemd/system/` 及使用者的 systemd 設定目錄註冊
 cd /srv/camera-monitor/source
 sudo /srv/camera-monitor/bin/camera-maintenance check
 sudo /srv/camera-monitor/bin/camera-maintenance backup
-sudo python3 preflight.py --stage . --manifest camera-monitor-features1-manifest.json
+sudo python3 preflight.py --stage . --manifest camera-monitor-tuning1-manifest.json
 ```
 
 新備份 configuration.tar.gz 封存實際的 app／config／web／bin／vendor，避免只備份系統入口連結。媒體與資料庫仍由既有一致性備份流程處理；不遞迴備份 backups、archive 或自己。驗證器同時支援搬移前的 `opt/camera-ai/...` 與新 `srv/camera-monitor/app/ai/...` 封存格式，舊備份不改寫。
+
+功能後備份 `20261102-010557-441353` 已校驗 2,900 檔／21,478,673,751 bytes，無活動片段略過；它早於最後音訊 clock 修正與文件。備份並非日後程式／媒體的持續副本；來源 Git、模型／身分與活動片段限制見 [RECOVERY.md](RECOVERY.md)。
 
 同磁碟搬移不會增加異地備份能力。外部備份位置、實機 iPhone 與穩定外網整檔下載仍維持既有待驗收狀態。
 

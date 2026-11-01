@@ -1,0 +1,12 @@
+"use strict";
+const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+const window={};vm.runInNewContext(fs.readFileSync('camera-connection.js','utf8'),{window,document:{getElementById:()=>null}});
+const history=new window.CameraConnectionWindow();
+assert.equal(history.add(true,30,0).label,'穩定度觀察中');
+for(let n=1;n<60;n++)history.add(true,30,n*5000);
+assert.equal(history.add(true,30,300000).label,'連線穩定');assert.equal(history.samples.length,60);
+assert.equal(history.add(false,0,305000).label,'連線中斷');
+const resumed=history.add(true,600,310000);assert.equal(resumed.reconnects,1);assert.equal(resumed.label,'連線不穩定');
+const later=history.add(true,25,700000);assert.equal(later.total,1,'background gap is not counted as healthy observation');
+assert.equal(later.label,'穩定度觀察中');
+console.log('Connection observation: bounded rolling samples, outage, recovery and observation gap passed');
